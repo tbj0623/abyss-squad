@@ -3364,11 +3364,48 @@ public final class Game {
         }
     }
 
+    /**
+     * 联机队友掉线或选择超时后的确定性兜底。
+     * 先排除空槽与满层遗物，再按职业偏好、流派共鸣进度、稀有度排序；
+     * 进化牌优先兑现已满足门槛的进化（高阶线优先）。同分选靠前的卡。
+     * 不消耗 RNG，避免自动选牌导致主机与客户端模拟分歧。
+     */
+    private int bestAutoChoice(Player p) {
+        int best = 0;
+        float bestScore = -Float.MAX_VALUE;
+        for (int i = 0; i < 3; i++) {
+            int evo = p.evolveOffer[i];
+            int relic = p.offers[i];
+            float score;
+            if (evo >= 0 && evo < Evolutions.COUNT) {
+                score = 1000f + Evolutions.TIER[evo] * 20f;
+            } else if (relic >= 0 && relic < Relics.COUNT) {
+                if (p.relics[relic] >= Relics.CAP[relic]) {
+                    score = -1000f;  // 只有其他牌也不可拿时才兑换满层补偿
+                } else {
+                    int school = Relics.SCHOOL[relic];
+                    int distinct = schoolCount(p, school);
+                    boolean newKind = p.relics[relic] == 0;
+                    score = ClassRules.weightMul(p.role, relic) * 100f
+                            + Relics.RARITY[relic] * 12f + Math.min(3, distinct) * 26f
+                            + (newKind && distinct == 2 ? 80f : 0f)
+                            + (!newKind ? 12f : 0f);
+                    if (newKind && distinctRelics(p) >= doctrineRelicSlots()) score = -950f;
+                }
+            } else {
+                continue;  // 进化选择只有 1~2 张时，不能自动点到空槽
+            }
+            if (score > bestScore) { bestScore = score; best = i; }
+        }
+        return best;
+    }
+
     private void updateChoice(float dt) {
         if (!soloRun) {
             choiceClock -= dt;
             for (Player p : players)
-                if (p.chosen < 0 && (!p.connected || choiceClock <= 0)) choose(p.id, 0, 0);
+                if (p.chosen < 0 && (!p.connected || choiceClock <= 0))
+                    choose(p.id, bestAutoChoice(p), 0);
         }
         boolean done = true;
         for (Player p : players) if (p.chosen < 0) done = false;
@@ -4323,15 +4360,19 @@ public final class Game {
     private void startTelegraph(Enemy e, Player p) {
         float base = Enemies.TELEGRAPH[e.type] * (e.elite ? .85f : 1);
         float scale = Balance.telegraphScale(e.behavior);
-        e.telegraph = base * scale;
+        // 所有契约 / 精英 / 普通敌人共享的可反应底线。原先 Enemies.valid()
+        // 已校验 0.45 秒，但实战路径未使用该下限（噬星虫只有 0.35 秒）。
+        e.telegraph = Math.max(Enemies.TELEGRAPH_FLOOR, base * scale);
         e.windup = e.telegraph;
         e.windupT = 0;
         e.threat = threatOf(e.behavior, e.elite);
         e.tx = clamp(p.x + p.dx * 34, 45, 1075);
         e.ty = clamp(p.y + p.dy * 34, 48, 572);
+        // 多出来的预警从出手后的冷却等量扣除，尽量维持整体出手频率。
+        // 冷却保留既有的保底，避免极高速敌人连续零间隔出手。
         e.cooldown = Enemies.COOLDOWN[e.type] * (e.elite && e.affix == 3 ? .7f : 1)
                 / Balance.PACE[contract]
-                - base * (scale - 1f);
+                - (e.telegraph - base);
         e.cooldown = Math.max(base * .35f, e.cooldown);
     }
 

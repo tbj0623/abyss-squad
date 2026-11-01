@@ -117,8 +117,8 @@ public final class Enemies {
      *   <li>所以下限不是削弱数值，而是把"炼狱难在反应不过来"改成
      *       "炼狱难在要同时处理三件事"——难度来自数量与组合，不来自不可读。</li>
      * </ul>
-     * 只允许通过 {@link #telegraphSeconds(int, float)} 读取预警，不要在调用点再自行做除法，
-     * 否则下限会被绕开。
+     * 表级审计通过 {@link #telegraphSeconds(int, float)} 验证各契约的节奏下限；
+     * 实战 {@code Game.startTelegraph} 在行为放大和精英缩短之后再次钳住本常量。
      */
     public static final float TELEGRAPH_FLOOR = .45f;
 
@@ -129,15 +129,15 @@ public final class Enemies {
      * <ul>
      *   <li>{@code pace} 传 {@code Balance.PACE[contract]}；0 / 负数 / NaN 一律按 0.01 处理，
      *       避免出现 Infinity 预警（那等于永远不出手）。</li>
-     *   <li>行为放大（{@code Balance.telegraphScale}）与精英紧缩（×.85）应在<b>本函数之后</b>再乘，
-     *       并由调用方再取一次 {@code max(TELEGRAPH_FLOOR, …)}——见 {@code Game.startTelegraph}。
-     *       原因：精英/致命招式的"形状更险"是设计，但不能把窗口压回生理不可反应。</li>
+     *   <li>这是数据表审计辅助函数；实战攻击循环故意不将蓄力除以 PACE，
+     *       PACE 只加快冷却和弹速。{@code Game.startTelegraph} 先叠加行为与精英倍率，
+     *       最后直接对 TELEGRAPH_FLOOR 钳制，以免叠加倍率再次压回不可反应窗口。</li>
      *   <li>越界 type 直接返回下限：这是数据错误，宁可给出最保守的可反应值，也不要抛异常打断战斗。</li>
      * </ul>
      */
     public static float telegraphSeconds(int type, float pace) {
         if (type < 0 || type >= COUNT) return TELEGRAPH_FLOOR;
-        float p = Math.max(.01f, pace);
+        float p = Float.isFinite(pace) ? Math.max(.01f, pace) : .01f;
         return Math.max(TELEGRAPH_FLOOR, TELEGRAPH[type] / p);
     }
 
