@@ -54,6 +54,106 @@ package com.dilao.core;
 public final class Events {
     private Events() {}
 
+    /**
+     * 玩家做选择前看到的实际收益与风险。与 Game.resolveEvent 的 13 个分支保持一致；
+     * COST_* 只代表预付星尘，生命、遗物及延迟代价必须在这里明确列出。
+     * 预览不消耗随机数，也不改变游戏状态。
+     */
+    public static String preview(Game g, int event, int choice) {
+        if (event < 0 || event >= COUNT || choice < 0 || choice > 1)
+            return "未知事件";
+        boolean a = choice == 0;
+        int cost = a ? COST_A[event] : COST_B[event];
+        String prefix = cost > 0 ? "星尘 -" + cost + " · " : "";
+        float pa = PARAM_A[event], pb = PARAM_B[event], pc = PARAM_C[event];
+        float meta = g != null && !g.players.isEmpty()
+                ? 1f + Math.max(0f, g.players.get(0).metaEvent) : 1f;
+        String effect;
+        switch (TYPE[event]) {
+            case 0:
+                effect = a ? "当前生命 -" + pct(pa) + " · 血脉契约 +" + count(pb) + "层"
+                        : "星尘 +" + Math.round((int) pc * meta);
+                break;
+            case 1:
+                effect = a ? "遗物 +" + count(pa) + "件"
+                        : "生命 -" + (int) pb + "点 · 星尘 +" + Math.round((int) pc * meta);
+                break;
+            case 2:
+                effect = a ? "免费重掷 +" + count(pa)
+                        + (pb > 0 ? " · 当前生命 -" + pct(pb) : "")
+                        : "星尘 +" + Math.round((int) pc * meta);
+                break;
+            case 3:
+                effect = a ? "当前生命 -" + pct(pa) + " · 遗物 +" + count(pb) + "件"
+                        : "生命恢复 " + (int) pc + "点";
+                break;
+            case 4:
+                effect = a ? "生命恢复 " + (int) pa + " · 冷却清零 · 3站后生命 -" + pct(pb)
+                        : "星尘 +" + Math.round((int) pc * meta);
+                break;
+            case 5:
+                if (a) {
+                    boolean hasRelic = false;
+                    if (g != null && !g.players.isEmpty()) {
+                        for (int n : g.players.get(0).relics)
+                            if (n > 0) { hasRelic = true; break; }
+                    }
+                    String target = (int) pb == 1 ? "最贵" : (int) pb == 2 ? "最薄" : "最厚";
+                    effect = hasRelic ? "强化" + target + "遗物 +" + count(pa) + "层" : "无遗物时伤害 +12%";
+                } else effect = "星尘 +" + Math.round((int) pc * meta);
+                break;
+            case 6:
+                effect = a ? "胜率 " + pct(pa) + " · 赢遗物 +" + count(pb)
+                        + " · 输最大生命 -" + pct(pc)
+                        : "星尘 +" + (count(pb) * 12);
+                break;
+            case 7:
+                effect = a ? "遗物 +" + count(pa) + "件 · 诅咒 +1层"
+                        : "生命恢复 " + (int) pb + "点";
+                break;
+            case 8: {
+                int debt = g == null ? 0 : g.eventDebt;
+                int next = a ? Math.min(9, debt + 1) : Math.max(0, debt - 1);
+                effect = "星尘 +" + Math.round((int) (a ? pb : pc) * meta)
+                        + " · 血债 " + (a ? "+1" : (debt > 0 ? "-1" : "不变"))
+                        + (next > 0 ? " · 3站后生命 -" + pct(pa * next) : " · 无新增血债");
+                break;
+            }
+            case 9:
+                effect = a ? "遗物 +" + count(pa) + "件 · 3站后"
+                        + ((int) pc == 1 ? "星尘 -" + (int) pb : "生命 -" + pct(pb))
+                        : "星尘 +" + Math.max(6, Math.round(pb));
+                break;
+            case 10:
+                effect = a ? "胜率 " + pct(pa) + " · 赢遗物 +1 · 输最大生命 -" + pct(pb)
+                        : "胜率 " + pct(Math.max(.05f, 1f - pa))
+                        + " · 赢遗物 +2 · 输最大生命 -" + pct(pc);
+                break;
+            case 11: {
+                boolean hasRelic = false;
+                if (g != null && !g.players.isEmpty())
+                    for (int n : g.players.get(0).relics)
+                        if (n > 0) { hasRelic = true; break; }
+                effect = a ? (hasRelic ? "失去遗物 1层 · 换回 +" + count(pb) + "件"
+                        + ((int) pa > 0 ? " · 星尘 +" + (int) pa : "")
+                        : "没有遗物 · 免费获得 1件")
+                        : "星尘 +" + Math.round((int) pc * meta);
+                break;
+            }
+            case 12:
+                effect = a ? "当前生命 -" + pct(pa) + " · 遗物 +" + count(pb) + "件"
+                        : "当前生命 -" + pct(pc) + " · 星尘 +" + Math.round(pc * 100f);
+                break;
+            default: return prefix + "效果待确认";
+        }
+        return prefix + effect;
+    }
+
+    private static int count(float n) { return Math.max(1, (int) n); }
+    private static String pct(float n) { return Math.round(n * 100f) + "%"; }
+
+
+
     public static final int COUNT = 36;
 
     /** 引擎当前已实现的 TYPE 上界（含）。必须与 {@link Game#resolveEvent} 的 case 分支一致。 */

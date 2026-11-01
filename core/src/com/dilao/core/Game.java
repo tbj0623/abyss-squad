@@ -47,10 +47,8 @@ public final class Game {
     public float waveWait, damageTaken;
     // ══════════════════════════════════════════════════════════════
     //  事件机制状态（v2.2 · 13 种选择结构）
-    //  TODO(Codec)：这三个字段**尚未**序列化。Codec.java 由他人修改中，本批不碰它。
-    //  接入 Codec 时按 "eventDebt, delayedKind, delayedRooms, delayedAmount(int 千分比)"
-    //  追加到 Game 字段段末尾，并在 vN → vN+1 迁移里默认 0。
-    //  未序列化的后果：读档后挂账清零 = 延迟代价被白嫖，属于需要修复的已知缺口。
+    //  eventDebt/delayedKind/delayedRooms/delayedAmount 已由 Codec v9 起保存，
+    //  旧档迁移默认 0，EventVarietyTest 会强校验挂账读档不丢失。
     // ══════════════════════════════════════════════════════════════
     /**
      * 「血债」层数（TYPE 8 风险累积）：每层在结算时按 {@code delayedAmount} 比例扣当前生命。

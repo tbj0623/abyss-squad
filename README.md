@@ -1,4 +1,4 @@
-# 深渊小队 / Abyss Squad — v2.4.0-beta.1
+# 深渊小队 / Abyss Squad — v2.4.1-beta.1
 
 > **公开测试版**：原生 Android 俯视角割草 + Roguelite 构筑。代码、程序化生成的美术与音频以 MIT 许可证开源。此版本通过核心自动化回归和发布构建验证，但尚未完成多机弱网、低端真机与无障碍专项验收。
 
@@ -128,7 +128,7 @@ java -ea -cp build\probe2 PlayProbe 3 5 0
 
 探针是一个**带人类缺陷**的 bot：注入 180–320ms 反应延迟、±15% 走位漂移、每 2–4 秒换向抖动、10% 技能漏放率，并跑三档选牌策略（贪心 / 流派向 / 最优）。主指标取**流派向**——即真人的典型行为。
 
-### 测试套件（13 套，`scripts/test.ps1`）
+### 测试套件（14 套，`scripts/test.ps1`）
 
 | 套件 | 守护什么 |
 |---|---|
@@ -141,10 +141,11 @@ java -ea -cp build\probe2 PlayProbe 3 5 0
 | CrossSchoolTest | 6 组跨流派逐组 A/B + 门槛 |
 | ClassRulesTest | 12 职业规则有效且真的接线 |
 | DoctrineEffectTest | 18 张天赋牌收益与代价两面 |
-| MetaNodeTest | 32 个元进度节点逐个有效 |
+| MetaNodeTest | 关键元进度加成 A/B + 存档往返（现已真正接入脚本） |
 | PactEffectTest | 12 条契约词条逐条 A/B |
-| EventVarietyTest | 36 个事件效果指纹两两不同 |
-| ContentAudit | 数据表 / 平衡预算 / 契约软性偏差（v2.3 新接入） |
+| EventVarietyTest | 36 个事件效果指纹、延迟扣费及存档 |
+| EventPreviewTest | 36 个事件的两分支风险、费用与可选条件 |
+| ContentAudit | 数据表 / 平衡预算 / 契约软性偏差 |
 
 
 ### 实测结果（v2.3 为 180 局 `/3 种子`；v2.2 为 480 局 `/8 种子`）

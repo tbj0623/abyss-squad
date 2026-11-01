@@ -93,20 +93,19 @@ public final class EventScreen {
 
     // ── 选项 ────────────────────────────────────────────────────
     private void drawChoices(Canvas c, Ui ui, Game g, int event, float x, float w, boolean canLead) {
-        int type = Events.TYPE[event];
         int costA = Events.COST_A[event];
         int costB = Events.COST_B[event];
-        int reasonA = reason(g, event, 0);
-        int reasonB = reason(g, event, 1);
-        boolean okA = reasonA == 0;
-        boolean okB = reasonB == 0;
+        boolean okA = g.canEvent(0);
+        boolean okB = g.canEvent(1);
 
         drawChoice(c, ui, 4000, x, 372, w, 92, "A", Events.CHOICE_A[event],
-                costA, reasonHint(reasonA, type, 0), okA, canLead, Ui.MINT);
+                costA, okA ? Events.preview(g, event, 0) : blockedHint(g, event, 0),
+                okA, canLead, Ui.MINT);
         drawChoice(c, ui, 4001, x, 480, w, 92, "B", Events.CHOICE_B[event],
-                costB, reasonHint(reasonB, type, 1), okB, canLead, Ui.BLUE);
+                costB, okB ? Events.preview(g, event, 1) : blockedHint(g, event, 1),
+                okB, canLead, Ui.BLUE);
 
-        ui.text(c, "选项代价与收益在选定后立即结算，无法反悔。", x, 600, 12,
+        ui.text(c, "部分代价会在 3 站后结算，选择不可撤销。", x, 600, 12,
                 ui.alpha(Ui.MUTED, 185), false);
     }
 
@@ -130,9 +129,11 @@ public final class EventScreen {
         int costColor = affordable ? (cost > 0 ? Ui.GOLD : ui.alpha(Ui.MUTED, 225)) : Ui.RED;
         if (cost > 0) {
             ui.icon(c, tx + 8, y + 66, 13, 8, costColor);
-            ui.text(c, costText, tx + 20, y + 71, 12.5f, costColor, true);
+            ui.text(c, costText, tx + 20, y + 71, ui.fit(costText, w - 172, 12.5f, 9.5f),
+                    costColor, true);
         } else {
-            ui.text(c, costText, tx, y + 71, 12.5f, costColor, true);
+            ui.text(c, costText, tx, y + 71, ui.fit(costText, w - 152, 12.5f, 9.5f),
+                    costColor, true);
         }
         if (!canLead) {
             ui.right(c, "等待队长决定", x + w - 96, y + 71, 11.5f, Ui.BLUE, false);
@@ -146,57 +147,16 @@ public final class EventScreen {
         ui.line(c, ax + 6, ay, ax - 1, ay + 7, arrowColor, 2.4f);
     }
 
-    /** 0 可行 / 1 已选择 / 2 星尘不足 / 3 条件不符。 */
-    private static int reason(Game g, int event, int choice) {
-        if (g.eventChoice >= 0) return 1;
-        int type = Events.TYPE[event];
+    /** 启用状态直接使用核心规则 Game.canEvent，避免 UI 与引擎的生命门槛漂移。 */
+    private static String blockedHint(Game g, int event, int choice) {
         int cost = choice == 0 ? Events.COST_A[event] : Events.COST_B[event];
-        if (g.coins < cost) return 2;
-        if (choice == 0) {
-            if (type == 0) {
-                for (int i = 0; i < g.players.size(); i++) {
-                    Game.Player p = g.players.get(i);
-                    if (p != null && p.hp <= p.maxHp * .32f) return 3;
-                }
-            }
-            if (type == 3) {
-                for (int i = 0; i < g.players.size(); i++) {
-                    Game.Player p = g.players.get(i);
-                    if (p != null && p.maxHp < 70) return 3;
-                }
-            }
+        if (g.coins < cost) return "星尘不足 · 需要 " + cost;
+        if (choice == 0 && (Events.TYPE[event] == 0 || Events.TYPE[event] == 3
+                || Events.TYPE[event] == 7 || Events.TYPE[event] == 12)) {
+            for (Game.Player p : g.players)
+                if (p.hp <= p.maxHp * .32f) return "生命过低 · 队员需高于 32% 生命";
         }
-        return 0;
-    }
-
-    private static String reasonHint(int reason, int type, int choice) {
-        if (reason == 2) return "星尘不足";
-        if (reason == 3) {
-            return type == 0 ? "生命过低，无法献血" : "生命上限不足";
-        }
-        return costHint(type, choice);
-    }
-
-    private static String costHint(int type, int choice) {
-        if (choice != 0) {
-            switch (type) {
-                case 0: return "无代价 · 直接离开";
-                case 1: return "受到灼伤 · 星尘 +34";
-                case 2: return "无代价 · 保留星尘";
-                case 3: return "无代价 · 恢复少量生命";
-                case 4: return "无代价 · 星尘 +18";
-                case 5: return "无代价 · 星尘 +26";
-                case 6: return "无代价 · 星尘 +22";
-                default: return "无代价 · 获得短暂护盾";
-            }
-        }
-        switch (type) {
-            case 0: return "代价 · 生命上限 -18%";
-            case 3: return "代价 · 生命上限 -26";
-            case 6: return "代价 · 30% 当前生命";
-            case 7: return "代价 · 本层承伤提升";
-            default: return "代价 · 星尘";
-        }
+        return "当前不可选择";
     }
 
     // ── 结果态 ──────────────────────────────────────────────────
@@ -385,20 +345,15 @@ public final class EventScreen {
         ui.panel(c, x, y, w, 92, 14, 0x99101c23, ui.alpha(Ui.EDGE, 160));
         int costA = Events.COST_A[event];
         int costB = Events.COST_B[event];
-        boolean okA = g.eventChoice < 0 && canAffordStatic(g, event, 0);
-        boolean okB = g.eventChoice < 0 && canAffordStatic(g, event, 1);
-        ui.text(c, "A  " + (costA > 0 ? costA + " 星尘" : "零代价") + (okA ? "  ·  可行" : "  ·  不可行"),
+        boolean okA = g.canEvent(0);
+        boolean okB = g.canEvent(1);
+        ui.text(c, "A  预付星尘 " + costA + (okA ? "  ·  可选" : "  ·  不可选"),
                 x + 22, y + 36, 13, costA > 0 ? Ui.GOLD : Ui.MUTED, false);
-        ui.text(c, "B  " + (costB > 0 ? costB + " 星尘" : "零代价") + (okB ? "  ·  可行" : "  ·  不可行"),
+        ui.text(c, "B  预付星尘 " + costB + (okB ? "  ·  可选" : "  ·  不可选"),
                 x + 22, y + 62, 13, costB > 0 ? Ui.GOLD : Ui.MUTED, false);
         ui.right(c, "星尘余额 " + Math.max(0, g.coins), x + w - 22, y + 36, 13, Ui.WHITE, true);
-        ui.right(c, canLead ? "选择会立即结算" : "等待队长", x + w - 22, y + 62, 11.5f,
+        ui.right(c, canLead ? "生命与延迟代价见左侧" : "等待队长", x + w - 22, y + 62, 11.5f,
                 canLead ? ui.alpha(Ui.MUTED, 200) : Ui.BLUE, false);
-    }
-
-    private boolean canAffordStatic(Game g, int event, int choice) {
-        int cost = choice == 0 ? Events.COST_A[event] : Events.COST_B[event];
-        return g.coins >= cost;
     }
 
     private static int artAccent(int event) {

@@ -433,40 +433,34 @@ public final class EventVarietyTest {
     }
 
     // ══════════════════════════════════════════════════════════════
-    //  7. 声明 Codec 缺口（不是"已修复"）
+    //  7. 延迟代价必须穿过存档；缺失即测试失败，不能再作为提示放行
     // ══════════════════════════════════════════════════════════════
 
     private static void codecGapIsDeclared() {
-        System.out.println("── 7. 已知缺口：事件挂账字段尚未进 Codec ──");
-        // 这条断言故意写成"确认缺口存在"。删掉 Codec 修复后它会自动变绿，
-        // 从而提醒下一个人：这里可以删了。
-        Game g = freshGame(9100L);
-        g.roomsTotal = 999;
-        g.phase = Game.EVENT;
-        g.eventType = 16;      // TYPE 9 延迟结算
-        g.eventChoice = -1;
-        g.coins = 800;
-        g.resolveEvent(0);
-        boolean scheduled = g.delayedKind != Game.DELAY_NONE;
-        boolean survives = true;
-        if (scheduled) {
+        System.out.println("── 7. 事件挂账存档往返强校验 ──");
+        for (int ev = 0; ev < Events.COUNT; ev++) {
+            int type = Events.TYPE[ev];
+            if (type != 4 && type != 8 && type != 9) continue;
+            Game g = freshGame(9100L + ev);
+            g.roomsTotal = 999;
+            g.phase = Game.EVENT;
+            g.eventType = ev;
+            g.eventChoice = -1;
+            g.coins = 800;
+            boolean accepted = g.resolveEvent(0);
+            check("事件 #" + ev + " 挂账可以建立", accepted && g.hasDelayedPenalty(), "");
+            if (!accepted || !g.hasDelayedPenalty()) continue;
             try {
                 Game back = Codec.decode(Codec.encode(g));
-                survives = back.delayedKind == g.delayedKind
+                check("事件 #" + ev + " 读档保留挂账种类/站数/金额/血债",
+                        back.delayedKind == g.delayedKind
                         && back.delayedRooms == g.delayedRooms
-                        && Math.abs(back.delayedAmount - g.delayedAmount) < 1e-6f;
+                        && Math.abs(back.delayedAmount - g.delayedAmount) < 1e-6f
+                        && back.eventDebt == g.eventDebt, "Codec 丢失了事件延迟状态");
             } catch (Exception e) {
-                survives = false;
+                fail("事件 #" + ev + " Codec 往返抛异常：" + e);
             }
         }
-        if (scheduled && !survives) {
-            System.out.println("     TODO(Codec)：事件挂账读档后丢失——已知缺口，"
-                    + "待 Codec 由他人改完后补齐");
-        } else if (scheduled) {
-            System.out.println("     事件挂账已能读写档往返（Codec 已补齐，可删除本段）");
-        }
-        // 这条永远通过：它只负责把缺口打印出来，不让别人以为已经修好了。
-        check("Codec 缺口状态已探测并记录（不阻塞本测试）", true, "");
         System.out.println();
     }
 
