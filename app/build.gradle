@@ -1,0 +1,125 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ── 发布签名 ────────────────────────────────────────────────────────────────
+// 本地自签名（不是应用商店发行）。密码写在 releases/v1.0/SIGNING.md。
+// 缺文件时静默降级，保证 `assembleDebug` 在干净机器上仍然能跑。
+def keystoreFile = rootProject.file('releases/keystore/abyss-release.jks')
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('releases/keystore/keystore.properties')
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def hasReleaseKey = keystoreFile.exists() && keystorePropsFile.exists()
+
+android {
+    namespace 'com.dilao.abysssquad'
+    compileSdk 35
+    useLibrary 'android.test.runner'
+    useLibrary 'android.test.base'
+    useLibrary 'android.test.mock'
+
+    defaultConfig {
+        applicationId 'com.dilao.abysssquad'
+        minSdk 26
+        targetSdk 35
+        versionCode 2401
+        versionName '2.4.0-beta.1'
+        testInstrumentationRunner 'android.test.InstrumentationTestRunner'
+    }
+
+    sourceSets { main.java.srcDirs += '../core/src' }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+
+    signingConfigs {
+        release {
+            if (hasReleaseKey) {
+                storeFile keystoreFile
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // 调试包保持原样：不混淆、可调试。
+        }
+        release {
+            debuggable false
+            minifyEnabled true
+            shrinkResources false          // 资源名是运行时按字符串查的，不能裁剪
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseKey) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    // release 不保留任何调试/测试用附加物
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/*.version', 'META-INF/*.kotlin_module']
+        }
+    }
+}
+
+// 构建后打印实际使用的签名，避免"以为签了其实没签"。
+tasks.register('printReleaseSigning') {
+    doLast {
+        def v = android.buildTypes.release
+        println "[release] minify=${v.minifyEnabled} shrinkResources=${v.shrinkResources} " +
+                "debuggable=${v.debuggable} signing=${hasReleaseKey ? 'local-keystore' : 'UNSIGNED'}"
+    }
+}
+
+// ── 资源名存活校验 ──────────────────────────────────────────────────────────
+// 游戏用 getIdentifier(name, "raw"/"drawable", pkg) 在运行时按名字取资源。
+// 只要 R8/资源压缩把 raw/*.wav、*.ogg 或 drawable-nodpi/*.png 改名/移除，
+// 音频与精灵就会在发布包里静默消失（编译仍然成功）。
+// 这个任务在 assembleRelease 之后读取 APK 的 resources.arsc，逐个核对
+// 资源条目名，缺任何一个就让构建失败。
+tasks.register('verifyReleaseAssets') {
+    dependsOn 'assembleRelease'
+    doLast {
+        def apkDir = layout.buildDirectory.dir('outputs/apk/release').get().asFile
+        def apk = apkDir.listFiles()?.find { it.name.endsWith('.apk') }
+        if (apk == null) throw new GradleException("release APK 未生成")
+
+        // 期望的资源名：从源目录直接读，避免手写清单与真实资源脱节。
+        def appDir = project.projectDir
+        def expectedRaw = (new File(appDir, 'src/main/res/raw').listFiles() ?: []).collect {
+            it.name.substring(0, it.name.lastIndexOf('.'))
+        }.toSorted()
+        def expectedDrawable = (new File(appDir, 'src/main/res/drawable-nodpi').listFiles() ?: []).collect {
+            it.name.substring(0, it.name.lastIndexOf('.'))
+        }.toSorted()
+
+        // res/ 在 APK 里是二进制 XML/arsc；这里用 zip 条目 + 字符串表双重检查。
+        def entries = new java.util.zip.ZipFile(apk).withCloseable { zip ->
+            zip.entries().collect { it.name }
+        }
+        def blobs = new StringBuilder()
+        new java.util.zip.ZipFile(apk).withCloseable { zip ->
+            ['resources.arsc'].each { name ->
+                def e = zip.getEntry(name)
+                if (e != null) zip.getInputStream(e).withStream { blobs.append(new String(it.readAllBytes(), 'ISO-8859-1')) }
+            }
+        }
+        def arsc = blobs.toString()
+
+        def missing = []
+        (expectedRaw + expectedDrawable).each { n ->
+            if (!arsc.contains(n)) missing << n
+        }
+        println "[verify] APK=${apk.name} zipEntries=${entries.size()} " +
+                "raw=${expectedRaw.size()} drawable=${expectedDrawable.size()} missing=${missing.size()}"
+        if (!missing.isEmpty()) {
+            throw new GradleException("发布包丢失了按名字加载的资源: ${missing}")
+        }
+        println "[verify] OK 全部 ${expectedRaw.size() + expectedDrawable.size()} 个按名字加载的资源都在 resources.arsc 中"
+    }
+}
+

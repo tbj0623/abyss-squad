@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!--
+        触觉反馈。没有这条声明时 GameAudio.vibrate() 会抛 SecurityException，
+        而它被 catch (Throwable ignored) 静默吞掉——设置里的「震动」开关看起来能开，实际永远是哑的。
+        这是普通权限，不弹窗、不涉及隐私。
+    -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <application
+        android:theme="@style/AppTheme"
+        android:icon="@drawable/ic_abyss"
+        android:label="深渊小队"
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:supportsRtl="true">
+        <activity
+            android:name=".MainActivity"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -1,0 +1,11 @@
+.gradle/
+**/build/
+local.properties
+*.jks
+*.keystore
+releases/keystore/
+.env
+.env.*
+
+# 临时抓取的研究页面（子代理生成）
+.tmpfetch/
