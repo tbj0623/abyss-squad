@@ -59,6 +59,7 @@ public final class ResultScreen {
     private void drawResult(Canvas c, Ui ui, float time, Game g, boolean won, int[] stats) {
         drawBackdrop(c, ui, time, won);
         float reveal = Math.min(1f, time * .9f);
+        boolean tutorial = stats != null && stats.length > 5 && stats[5] != 0;
 
         int accent = won ? Ui.GOLD : Ui.BLUE;
 
@@ -67,8 +68,8 @@ public final class ResultScreen {
         // 引导局在 4:45 由导演脚本直接置 WON（Onboarding.closeRun），
         // 玩家看到的却是「远征完成 · 抵达 2 / 15」—— 前后自相矛盾，
         // 会被理解成「完整远征只值两站」或「游戏在骗我」。
-        // 两种胜利都是真的，只是文案必须说实话。
-        boolean full = won && fullClear(g);
+        // 教学脚本只是一次安全撤离，不计正式胜场；标题和下一步按钮也需说清楚。
+        boolean full = won && !tutorial && fullClear(g);
         ui.centerSmall(c, !won ? "SQ U A D   L O S T"
                         : full ? "EXPEDITION COMPLETE" : "FIRST DIVE CLEARED",
                 720, 92, 12, ui.alpha(accent, 190));
@@ -79,6 +80,7 @@ public final class ResultScreen {
 
         String sub = !won
                 ? "星环熄灭在身后，但带出的星尘与印记不会消失。"
+                : tutorial ? "实战教学完成！奖励归你，正式通关从下一趟算起。"
                 : full ? "王座熄灭了。你们从深渊里带回了可以带走的一切。"
                 : "深渊记住了你。这只是一次试手，真正的远征还在下面。";
         ui.center(c, sub, 720, 216, 14, ui.alpha(Ui.WHITE, 210), false);
@@ -92,9 +94,12 @@ public final class ResultScreen {
         // 按钮
         float by = 692, bw = 270, bh = 88, gap = 28;
         boolean canRestart = true;
-        ui.button(c, Ui.A_RESTART, 720 - bw - gap * .5f, by, bw, bh, "再 来 一 局", true, canRestart);
-        ui.button(c, Ui.A_HOME, 720 + gap * .5f, by, bw, bh, "返 回 营 地", false, true);
-        ui.centerSmall(c, "记录已自动写入星盘", 720, by + bh + 20, 11.5f, ui.alpha(Ui.MUTED, 180));
+        ui.button(c, Ui.A_RESTART, 720 - bw - gap * .5f, by, bw, bh,
+                tutorial ? "强 化 星 盘" : "再 来 一 局", true, canRestart);
+        ui.button(c, Ui.A_HOME, 720 + gap * .5f, by, bw, bh,
+                tutorial ? "准 备 远 征" : "返 回 营 地", false, true);
+        ui.centerSmall(c, tutorial ? "首趟奖励已入账 · 下一局开始累计正式胜场" : "记录已自动写入星盘",
+                720, by + bh + 20, 11.5f, ui.alpha(Ui.MUTED, 180));
     }
 
     /**

@@ -50,6 +50,8 @@ public final class GameView extends View {
     private final Onboarding onboarding = new Onboarding();
     /** 引导局在地图上替玩家选路的计时（秒）；离开 MAP 即归零，玩家自己点了也自然失效。 */
     private float tutorialMapClock;
+    /** 本次结算是否来自教学导演的脚本收尾；只活在当前显示会话里。 */
+    private boolean tutorialResult;
     private final CodexScreen codex = new CodexScreen();
     private final PactScreen pactScreen = new PactScreen();
     private final DoctrineScreen doctrineScreen = new DoctrineScreen();
@@ -90,6 +92,8 @@ public final class GameView extends View {
     private float transition;
     private float saveClock;
     private int lastPhase = -1;
+    /** 结算入场时的视觉时钟：每一局都从零播放奖励入场动画。 */
+    private float resultEnteredAt;
     private int lastKills;
     private float previousHp = -1;
     private boolean recorded;
@@ -305,8 +309,9 @@ public final class GameView extends View {
             session.game.pactMods = pactLobby.pactMods;
             session.game.pactHeat = Balance.heatOf(pactLobby.pactMods);
         }
-        // 首次运行：开始 4:45 的引导脚本（之后永不重播，见 Onboarding.start()）
-        if (onboarding.startIfFirstRun()) tutorialMapClock = 0;
+        // 未完成的首局被替换时从头教；选择「继续存档」则保留步骤。
+        tutorialResult = false;
+        if (onboarding.startForNewRun()) tutorialMapClock = 0;
         screen = S_RUN;
         recorded = false;
         lastPhase = -1;
@@ -326,10 +331,16 @@ public final class GameView extends View {
     private void resumeSaved() {
         Game loaded = saves.load();
         if (loaded == null) return;
+        // 兼容旧版本误将 WON/LOST 留在 .sav 的情况：已结算局不可再次载入领奖。
+        if (loaded.phase == Game.WON || loaded.phase == Game.LOST) {
+            saves.clear();
+            return;
+        }
         leave();
         session = new Session();
         session.bindMeta(meta);
         session.restore(loaded);
+        tutorialResult = false;
         Game.Player p = loaded.player(loaded.captain);
         if (p != null) {
             p.dx = p.dy = p.manual = 0;
@@ -396,6 +407,10 @@ public final class GameView extends View {
 
     private void checkpoint() {
         if (session != null && !session.online() && session.game != null) {
+            // 结算时 finishRun 已清档。之后 onPhaseChange/leave 又调用 checkpoint，
+            // 不能把 WON/LOST 写回「继续远征」，否则玩家能反复进入已结算战局。
+            int phase = session.game.phase;
+            if (phase == Game.WON || phase == Game.LOST) return;
             try { saves.save(session.game); } catch (Throwable ignored) {}
         }
     }
@@ -433,7 +448,7 @@ public final class GameView extends View {
         // 首次运行：跳过「模式 / 职业 / 契约」全部前置选择，直接开一局最简单的远征
         // （远征模式 + 游侠 + 漫游契约）。UX 报告 §3：0:08–0:20 只有一个 PLAY 按钮，
         // 模式与难度藏在 Advanced 后面；32 节点树在第一次结算前不出现。
-        if (onboarding.neverStarted()) {
+        if (!onboarding.done()) {
             selMode = Game.MODE_EXPEDITION;
             selRole = 0;                    // 游侠：射程最长、最好读
             selContract = 0;                // 漫游：HP ×1.02 / DMG ×0.70
@@ -588,6 +603,12 @@ public final class GameView extends View {
         return new int[]{meta.dust, meta.marks, meta.bestFloor, meta.runs, meta.wins};
     }
 
+    /** 结算额外带入「是否教学局」标记，保持其它屏幕原有 stats 契约。 */
+    private int[] resultStats() {
+        return new int[]{meta.dust, meta.marks, meta.bestFloor, meta.runs, meta.wins,
+                tutorialResult ? 1 : 0};
+    }
+
     private void drawMenu(Canvas c) {
         long t0 = System.nanoTime();
         bg.draw(c, art, visualTime, screen == S_MENU);
@@ -701,7 +722,8 @@ public final class GameView extends View {
         // 首次运行引导：只在单机局推进。dt 必须是 fx.timeScale() 之后的模拟步长
         // （drawRun 拿到的 simDt 已经是这一层）；引导会把本地玩家顶成无敌。
         boolean tutorial = !session.online() && onboarding.active();
-        if (tutorial && !paused && !inventory) {
+        if (tutorial && !paused && !inventory
+                && g.phase != Game.WON && g.phase != Game.LOST) {
             onboarding.update(g, simDt);
             // 3.5 秒没按闪避时，由导演替玩家静默触发一次（消费型，只触发一次）。
             // 只在真正能接受输入的战斗帧下发：转场 / 非战斗阶段里发出去也没人消费，
@@ -712,6 +734,11 @@ public final class GameView extends View {
             // 让玩家 0:00 就落在战斗里，而不是先面对一张不会用的地图。
             // tutorialRoute 内部会自己调 onPhaseChange，这里不要再补一次（会重复播音乐 / 音效）。
             tutorialMapClock = tutorialRoute(g, simDt, tutorialMapClock);
+            // 导演在这一帧把 FIGHT 改为 WON：立即结算并写 DONE。
+            // 否则结果按钮可能在下一帧统计前就被点击，导致半截引导重播。
+            if ((g.phase == Game.WON || g.phase == Game.LOST) && g.phase != lastPhase) {
+                onPhaseChange(g, p);
+            }
         } else {
             tutorialMapClock = 0;
         }
@@ -752,8 +779,9 @@ public final class GameView extends View {
             case Game.WON:
             case Game.LOST:
                 drawArena(c, g, p);
-                callScreen(resultScreen, "Result", c, ui, visualTime, g,
-                        g.phase == Game.WON, false, stats());
+                callScreen(resultScreen, "Result", c, ui,
+                        Math.max(0f, visualTime - resultEnteredAt), g,
+                        g.phase == Game.WON, false, resultStats());
                 break;
             case Game.LOBBY:
                 drawLobby(c, g);
@@ -862,10 +890,12 @@ public final class GameView extends View {
                 }
             }
         } else if (g.phase == Game.WON) {
+            resultEnteredAt = visualTime;
             if (audio != null) { audio.music(GameAudio.MUSIC_MENU); audio.play(GameAudio.VICTORY); }
             fx.flash(0xffeac487, .5f);
             if (!recorded) { recorded = true; finishRun(g, true); }
         } else if (g.phase == Game.LOST) {
+            resultEnteredAt = visualTime;
             if (audio != null) audio.play(GameAudio.DEFEAT);
             if (!recorded) { recorded = true; finishRun(g, false); }
         } else if (g.phase == Game.CHOICE) {
@@ -878,7 +908,11 @@ public final class GameView extends View {
     private void finishRun(Game g, boolean win) {
         try {
             if (!session.online()) {
-                meta.recordRun(g, win);
+                // 受保护的首局是实操教学：给资源，不冒充正式通关。
+                tutorialResult = win && onboarding.at(Onboarding.S_RESULT);
+                if (tutorialResult) meta.recordTutorial(g);
+                else meta.recordRun(g, win);
+                if (win && onboarding.active()) onboarding.complete();
                 saves.clear();
             }
         } catch (Throwable ignored) {}
@@ -1721,7 +1755,7 @@ public final class GameView extends View {
             case Ui.A_START:
                 // 首局跳过整个「远征准备」：UX 报告 §3 的 0:08–0:20 只有一个 PLAY。
                 // requestNewRun 会把模式/职业/契约锁成远征 + 游侠 + 漫游再开局。
-                if (onboarding.neverStarted()) requestNewRun();
+                if (!onboarding.done()) requestNewRun();
                 else screen = S_CHAR;
                 break;
             case Ui.A_CONTINUE: resumeSaved(); break;
@@ -1834,6 +1868,14 @@ public final class GameView extends View {
     }
 
     private void resultClick(int id) {
+        if (tutorialResult && (id == Ui.A_RESTART || id == 30
+                || id == Ui.A_HOME || id == 31)) {
+            // 第一趟后先让玩家用奖励强化/选职业。按钮文案由 ResultScreen 同步提供。
+            boolean upgrade = id == Ui.A_RESTART || id == 30;
+            leave();
+            screen = upgrade ? S_META : S_CHAR;
+            return;
+        }
         if (id == Ui.A_RESTART || id == 30) startSolo();
         else if (id == Ui.A_HOME || id == 31) { leave(); screen = S_MENU; }
         else if (id == Ui.A_RESUME || id == 40) { paused = false; lastNanos = 0; }

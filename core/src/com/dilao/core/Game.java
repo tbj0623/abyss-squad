@@ -5265,15 +5265,20 @@ public final class Game {
     }
 
     private void updateGems(float dt) {
-        for (Iterator<Gem> it = gems.iterator(); it.hasNext(); ) {
-            Gem gem = it.next();
+        // 从后往前走索引：拾取经验 -> 升级回血 ->「愈光之环」光爆击杀敌人
+        // 会同步往 gems 添加新宝石。Iterator.remove() 此时抛
+        // ConcurrentModificationException（PlayProbe: 策略1/契约1/医师/seed6）。
+        // 先摘下当前宝石再结算经验；光爆生成的新宝石留到下一帧拾取。
+        for (int i = gems.size() - 1; i >= 0; i--) {
+            if (i >= gems.size()) continue;  // 防御其它同步效果清空列表
+            Gem gem = gems.get(i);
             Player p = nearestLiving(gem.x, gem.y);
             if (p == null) continue;
             float d = distance(gem.x, gem.y, p.x, p.y);
             if (d < 26) {
-                gainXp(gem.value, p);
+                gems.remove(i);
                 coins += (int) (gem.value * .08f * (1 + p.bonusCoin));
-                it.remove();
+                gainXp(gem.value, p);
             } else if (d < p.magnet) {
                 float travel = Math.min(d, 340 * dt);
                 gem.x += (p.x - gem.x) / d * travel;

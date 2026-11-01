@@ -237,6 +237,18 @@ public final class Onboarding {
     }
 
     /**
+     * 开始一趟新的单机局。尚未完成教学时从移动步骤重新开始，避免上一次中途
+     * 返回营地或放弃存档后，从技能/结算的半截脚本恢复并白拿「胜利」。
+     * 如果玩家选择的是「继续存档」，GameView 不调用本方法，仍从保存的步骤继续。
+     */
+    public boolean startForNewRun() {
+        if (done()) return false;
+        resetRun();
+        persist(S_MOVE);
+        return true;
+    }
+
+    /**
      * 开始引导。只有「从未开始」才生效——已经跑过的一律拒绝，保证永不重播。
      * @return 是否真的开始了
      */
@@ -543,7 +555,11 @@ public final class Onboarding {
     private void closeRun(Game g) {
         if (g == null) return;
         try {
-            if (g.phase == Game.FIGHT && g.player(g.captain) != null && !g.player(g.captain).down) {
+            // 教学步长与真实房间进度不同步。若恰好停在 CHOICE/SHOP/EVENT，
+            // 旧实现只认可 FIGHT，12 秒后写 DONE 却不弹结算，玩家丢失首趟奖励。
+            // 脚本「撤离」允许从所有仍在进行的单机局阶段结束。
+            if (g.phase != Game.WON && g.phase != Game.LOST && g.phase != Game.LOBBY
+                    && g.player(g.captain) != null && !g.player(g.captain).down) {
                 g.notice = "第一趟完成 · 深渊记住了你";
                 g.phase = Game.WON;
             }

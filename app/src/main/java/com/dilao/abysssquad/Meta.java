@@ -1395,6 +1395,18 @@ public final class Meta {
      * <p>数值来自 {@code Balance.dustReward/markReward}（contract §12）。
      */
     void recordRun(Game g, boolean win) {
+        recordRun(g, win, false);
+    }
+
+    /**
+     * 教学局照常发放星尘、印记和图鉴收集，作为第一轮成长资源；
+     * 但脚本收尾不是正式通关，不得解锁最高契约、首胜成就或职业胜场。
+     */
+    void recordTutorial(Game g) {
+        recordRun(g, true, true);
+    }
+
+    private void recordRun(Game g, boolean win, boolean tutorial) {
         if (g == null) return;
         int dustGain;
         int marksGain;
@@ -1416,7 +1428,7 @@ public final class Meta {
             dustGain = Math.round(dustGain * Math.min(4f, bossPart * runPart));
 
             runs++;
-            if (win) wins++;
+            if (win && !tutorial) wins++;
             totalKills += Math.max(0, g.kills);
             bestKills = Math.max(bestKills, Math.max(0, g.kills));
             playSeconds += stay;
@@ -1455,7 +1467,7 @@ public final class Meta {
                 }
             }
             bestSynergy = Math.max(bestSynergy, Math.min(6, maxSynergy));
-            if (win && role >= 0 && role < ROLES) roleWon[role] = true;
+            if (win && !tutorial && role >= 0 && role < ROLES) roleWon[role] = true;
 
             // 敌种图鉴：结算时仍在场的敌种（Game 没有全量遭遇表，属防御性近似）
             if (g.enemies != null) {
@@ -1466,7 +1478,7 @@ public final class Meta {
             }
 
             // 一次性成就
-            if (win) {
+            if (win && !tutorial) {
                 int hardest = Math.max(0, contractCount() - 1);
                 if (g.contract >= hardest) achievementLocked(Achievements.A_INFERNO, 1);
                 if (g.freeRevivesUsed <= 0) achievementLocked(Achievements.A_NO_REVIVE, 1);

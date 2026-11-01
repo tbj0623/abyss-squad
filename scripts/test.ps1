@@ -111,91 +111,97 @@ $ledgerFailed = $false
 $migrationFailed = $false
 $loopbackFailed = $false
 $auditFailed = $false
+$gemFailed = $false
 
 Write-Host ""
-Write-Host "== 1/17 CoreTests =="
+Write-Host "== 1/18 CoreTests =="
 & java -ea -cp $out CoreTests
 if ($LASTEXITCODE -ne 0) { $coreFailed = $true }
 
 Write-Host ""
-Write-Host "== 2/17 RelicEffectTest (60 relics, grant-before vs grant-after) =="
+Write-Host "== 2/18 RelicEffectTest (60 relics, grant-before vs grant-after) =="
 & java -ea -cp $out RelicEffectTest
 if ($LASTEXITCODE -ne 0) { $relicFailed = $true }
 
 Write-Host ""
-Write-Host "== 3/17 EventContractTest (Events.TYPE <-> resolveEvent) =="
+Write-Host "== 3/18 EventContractTest (Events.TYPE <-> resolveEvent) =="
 & java -ea -cp $out EventContractTest
 if ($LASTEXITCODE -ne 0) { $eventFailed = $true }
 
 Write-Host ""
-Write-Host "== 4/17 BossChargeTest (boss charge state machine actually runs) =="
+Write-Host "== 4/18 BossChargeTest (boss charge state machine actually runs) =="
 & java -ea -cp $out BossChargeTest
 if ($LASTEXITCODE -ne 0) { $bossFailed = $true }
 
 Write-Host ""
-Write-Host "== 5/17 IdRolloverTest (entity id stays inside the Codec contract) =="
+Write-Host "== 5/18 IdRolloverTest (entity id stays inside the Codec contract) =="
 & java -ea -cp $out IdRolloverTest
 if ($LASTEXITCODE -ne 0) { $idFailed = $true }
 
 Write-Host ""
-Write-Host "== 6/17 WeaponFormTest (all three weapon forms are reachable and differ) =="
+Write-Host "== 6/18 WeaponFormTest (all three weapon forms are reachable and differ) =="
 & java -ea -cp $out WeaponFormTest
 if ($LASTEXITCODE -ne 0) { $formFailed = $true }
 
 Write-Host ""
-Write-Host "== 7/17 CrossSchoolTest (all 6 cross-school combos actually pay off) =="
+Write-Host "== 7/18 CrossSchoolTest (all 6 cross-school combos actually pay off) =="
 & java -ea -cp $out CrossSchoolTest
 if ($LASTEXITCODE -ne 0) { $crossFailed = $true }
 
 Write-Host ""
-Write-Host "== 8/17 ClassRulesTest (per-class relic rules are real and wired) =="
+Write-Host "== 8/18 ClassRulesTest (per-class relic rules are real and wired) =="
 & java -ea -cp $out ClassRulesTest
 if ($LASTEXITCODE -ne 0) { $classFailed = $true }
 
 Write-Host ""
-Write-Host "== 9/17 DoctrineEffectTest (18 doctrine cards: upside AND downside, + Codec v7->v8) =="
+Write-Host "== 9/18 DoctrineEffectTest (18 doctrine cards: upside AND downside, + Codec v7->v8) =="
 & java -ea -cp $out DoctrineEffectTest
 if ($LASTEXITCODE -ne 0) { $doctrineFailed = $true }
 
 Write-Host ""
-Write-Host "== 10/17 MetaNodeTest (progression hooks and save persistence) =="
+Write-Host "== 10/18 MetaNodeTest (progression hooks and save persistence) =="
 & java -ea -cp $out MetaNodeTest
 if ($LASTEXITCODE -ne 0) { $metaFailed = $true }
 
 Write-Host ""
-Write-Host "== 11/17 PactEffectTest (12 pacts: dedicated A/B probe each, + heat contract) =="
+Write-Host "== 11/18 PactEffectTest (12 pacts: dedicated A/B probe each, + heat contract) =="
 & java -ea -cp $out PactEffectTest
 if ($LASTEXITCODE -ne 0) { $pactFailed = $true }
 
 Write-Host ""
-Write-Host "== 12/17 EventVarietyTest (36 events -> 36 distinct decisions, costs really bite) =="
+Write-Host "== 12/18 EventVarietyTest (36 events -> 36 distinct decisions, costs really bite) =="
 & java -ea -cp $out EventVarietyTest
 if ($LASTEXITCODE -ne 0) { $varietyFailed = $true }
 
 Write-Host ""
-Write-Host "== 13/17 EventPreviewTest (all 36 event costs, delayed risks, core legality) =="
+Write-Host "== 13/18 EventPreviewTest (all 36 event costs, delayed risks, core legality) =="
 & java -ea -cp $out EventPreviewTest
 if ($LASTEXITCODE -ne 0) { $previewFailed = $true }
 
 Write-Host ""
-Write-Host "== 14/17 DeferredLedgerTest (independent invoices, v10 migration, v11 corruption) =="
+Write-Host "== 14/18 DeferredLedgerTest (independent invoices, v10 migration, v11 corruption) =="
 & java -ea -cp $out DeferredLedgerTest
 if ($LASTEXITCODE -ne 0) { $ledgerFailed = $true }
 
 Write-Host ""
-Write-Host "== 15/17 CodecMigrationTest (v10 to v11, invalid versions, trailing data) =="
+Write-Host "== 15/18 CodecMigrationTest (v10 to v11, invalid versions, trailing data) =="
 & java -ea -cp $out CodecMigrationTest
 if ($LASTEXITCODE -ne 0) { $migrationFailed = $true }
 
 Write-Host ""
-Write-Host "== 16/17 LoopbackTest (live TCP: four clients, replay, reconnect, version rejection) =="
+Write-Host "== 16/18 LoopbackTest (live TCP: four clients, replay, reconnect, version rejection) =="
 & java -ea -cp $out LoopbackTest
 if ($LASTEXITCODE -ne 0) { $loopbackFailed = $true }
 
 Write-Host ""
-Write-Host "== 17/17 ContentAudit (data tables, balance budgets, draft/economy invariants) =="
+Write-Host "== 17/18 ContentAudit (data tables, balance budgets, draft/economy invariants) =="
 & java -ea -cp $out ContentAudit | Select-Object -Last 4
 if ($LASTEXITCODE -ne 0) { $auditFailed = $true }
+
+Write-Host ""
+Write-Host "== 18/18 GemPickupTest (level-up heal burst drops gems during pickup) =="
+& java -ea -cp $out GemPickupTest
+if ($LASTEXITCODE -ne 0) { $gemFailed = $true }
 
 Write-Host ""
 Write-Host "================================"
@@ -216,9 +222,10 @@ if ($ledgerFailed)   { Write-Host "DeferredLedgerTest: FAILED" } else { Write-Ho
 if ($migrationFailed){ Write-Host "CodecMigrationTest: FAILED" } else { Write-Host "CodecMigrationTest: PASSED" }
 if ($loopbackFailed) { Write-Host "LoopbackTest:       FAILED" } else { Write-Host "LoopbackTest:       PASSED" }
 if ($auditFailed)    { Write-Host "ContentAudit:       FAILED" } else { Write-Host "ContentAudit:       PASSED" }
+if ($gemFailed)      { Write-Host "GemPickupTest:      FAILED" } else { Write-Host "GemPickupTest:      PASSED" }
 Write-Host "================================"
 
-$anyFailed = $coreFailed -or $relicFailed -or $eventFailed -or $bossFailed -or $idFailed -or $formFailed -or $crossFailed -or $classFailed -or $doctrineFailed -or $pactFailed -or $varietyFailed -or $previewFailed -or $ledgerFailed -or $migrationFailed -or $loopbackFailed -or $auditFailed
+$anyFailed = $coreFailed -or $relicFailed -or $eventFailed -or $bossFailed -or $idFailed -or $formFailed -or $crossFailed -or $classFailed -or $doctrineFailed -or $pactFailed -or $varietyFailed -or $previewFailed -or $ledgerFailed -or $migrationFailed -or $loopbackFailed -or $auditFailed -or $gemFailed
 if ($anyFailed) {
     exit 1
 }
