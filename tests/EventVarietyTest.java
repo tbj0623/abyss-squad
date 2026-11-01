@@ -27,9 +27,8 @@ import java.util.Map;
  *   <li><b>确定性</b>：同种子同输入 → 同结果（随机走 {@code Game.random}）。</li>
  * </ol>
  *
- * <p><b>不做什么</b>：不改 {@code Codec}。事件挂账字段（{@code eventDebt} /
- * {@code delayedKind} / {@code delayedRooms} / {@code delayedAmount}）目前<b>没有</b>
- * 序列化，本测试因此显式断言"这是已知缺口"，避免它被误当成已修复。
+ * <p><b>存档要求</b>：事件挂账自 Codec v9 起进入存档；v11 增加多笔账本。
+ * 本测试对 4/8/9 类型强校验读档保留金额、期限与血债层数，不能退回警告放行。
  *
  * <p>用法：
  * <pre>
@@ -351,11 +350,7 @@ public final class EventVarietyTest {
         out.rooms = g.delayedRooms;
         out.expectHp = p.maxHp * g.delayedAmount;
         out.expectCoins = Math.round(g.delayedAmount);
-        if (suppressDelay) {
-            g.delayedKind = Game.DELAY_NONE;
-            g.delayedRooms = 0;
-            g.delayedAmount = 0f;
-        }
+        if (suppressDelay) g.clearPendingPenalties();
 
         int start = g.roomsVisited;
         for (int i = 0; i < stations; i++) advanceOneStation(g);

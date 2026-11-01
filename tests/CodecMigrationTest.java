@@ -1,133 +1,91 @@
 import com.dilao.core.*;
 
-import java.io.*;
+import java.io.IOException;
 import java.util.Arrays;
 
 /**
- * Codec v6 → v7 迁移测试。
- * <p>做法：用 v7 编码一个真实 Game，然后手工把字节流"降级"成 v6 形态
- * （版本号改回 6、砍掉尾部 8 字节的 pactMods/pactHeat），再交给 decode。
- * 这保证了 v6 字节布局与真实旧档完全一致，而不是伪造一个近似结构。
+ * 当前 Codec v11 的真实兼容范围：v10 单笔挂账迁移与不受支持版本拒绝。
+ * 历史上此文件仍把 v7 当当前版本、把 v6 当可读存档，已与实际协议冲突。
+ * v7–v9 的中段字段布局与 v11 不同，不能仅通过修改版本头伪造旧档。
  */
 public final class CodecMigrationTest {
-
-    static int passed;
-    static final int OFF_VERSION = 4;   // MAGIC(4) 之后就是 version
-    static final int TAIL_V7 = 8;       // pactMods + pactHeat 两个 int
-
-    public static void main(String[] args) throws Exception {
-        testV7RoundTrip();
-        testV6MigratesToNoPacts();
-        testV6PreservesGameState();
-        testPactModsRoundTrip();
-        testCorruptRejected();
-        System.out.println(passed + " CHECKS PASSED");
+    private static int checks;
+    private static void check(boolean cond, String what) {
+        checks++;
+        if (!cond) throw new AssertionError(what);
     }
-
-    /** v7 自身可正常往返。 */
-    static void testV7RoundTrip() throws Exception {
-        Game g = makeGame();
-        g.pactMods = (1 << Balance.PACT_ELITE_TIDE) | (1 << Balance.PACT_DROUGHT);
+    private static void setVersion(byte[] data, int version) {
+        data[4] = (byte) (version >>> 24);
+        data[5] = (byte) (version >>> 16);
+        data[6] = (byte) (version >>> 8);
+        data[7] = (byte) version;
+    }
+    private static int versionOf(byte[] data) {
+        return ((data[4] & 255) << 24) | ((data[5] & 255) << 16)
+                | ((data[6] & 255) << 8) | (data[7] & 255);
+    }
+    private static Game fresh() {
+        Game g = new Game(20261102L);
+        g.addPlayer(1, "Migration", 0);
+        check(g.startSolo(1, Game.MODE_EXPEDITION), "start solo");
+        g.coins = 800;
+        g.pactMods = 1 << Balance.PACT_ELITE_TIDE;
         g.pactHeat = Balance.heatOf(g.pactMods);
-        byte[] data = Codec.encode(g);
-        check(readInt(data, OFF_VERSION) == 7, "v7 快照版本号写入为 7");
-        Game copy = Codec.decode(data);
-        check(copy.pactMods == g.pactMods, "v7 往返：pactMods 一致");
-        check(copy.pactHeat == g.pactHeat, "v7 往返：pactHeat 一致");
-    }
-
-    /** 核心验收：v6 字节流能读，且 pactMods/pactHeat 归零。 */
-    static void testV6MigratesToNoPacts() throws Exception {
-        Game g = makeGame();
-        g.pactMods = 0;
-        g.pactHeat = 0;
-        byte[] v7 = Codec.encode(g);
-        byte[] v6 = downgradeToV6(v7);
-        check(readInt(v6, OFF_VERSION) == 6, "降级后的字节流版本号为 6");
-        check(v6.length == v7.length - TAIL_V7, "v6 字节流比 v7 少 8 字节");
-
-        Game migrated = Codec.decode(v6);
-        check(migrated != null, "v6 字节流 decode 成功（不抛异常）");
-        check(migrated.pactMods == 0, "v6 迁移后 pactMods == 0");
-        check(migrated.pactHeat == 0, "v6 迁移后 pactHeat == 0");
-    }
-
-    /** v6 迁移不能丢其它状态。 */
-    static void testV6PreservesGameState() throws Exception {
-        Game g = makeGame();
-        g.coins = 321;
-        g.roomsVisited = 9;
-        g.floor = 4;
-        g.level = 7;
-        g.kills = 88;
-        byte[] v6 = downgradeToV6(Codec.encode(g));
-        Game m = Codec.decode(v6);
-        check(m.coins == 321, "v6 迁移保留 coins");
-        check(m.roomsVisited == 9, "v6 迁移保留 roomsVisited");
-        check(m.floor == 4, "v6 迁移保留 floor");
-        check(m.level == 7, "v6 迁移保留 level");
-        check(m.kills == 88, "v6 迁移保留 kills");
-        check(m.players.size() == g.players.size(), "v6 迁移保留玩家数");
-        check(m.seed == g.seed, "v6 迁移保留 seed");
-    }
-
-    /** 词条位掩码进存档后仍然生效。 */
-    static void testPactModsRoundTrip() throws Exception {
-        Game g = makeGame();
-        int all = (1 << Balance.PACT_COUNT) - 1;
-        g.pactMods = all;
-        g.pactHeat = Balance.heatOf(all);
-        Game copy = Codec.decode(Codec.encode(g));
-        check(copy.pactMods == all, "满配 12 条词条可完整存读档");
-        check(copy.pactHeat == Balance.PACT_HEAT_MAX, "满配 heat == PACT_HEAT_MAX");
-    }
-
-    /** 损坏的版本号仍然被拒绝。 */
-    static void testCorruptRejected() throws Exception {
-        Game g = makeGame();
-        byte[] data = Codec.encode(g);
-        writeInt(data, OFF_VERSION, 5);
-        boolean rejected = false;
-        try {
-            Codec.decode(data);
-        } catch (IOException e) {
-            rejected = true;
-        }
-        check(rejected, "未知版本号 v5 被拒绝（只接受 6 / 7）");
-    }
-
-    // ── 工具 ──────────────────────────────────────────────────────
-
-    static Game makeGame() {
-        Game g = new Game(20260101L);
-        g.addPlayer(1, "mig", 0);
-        g.startSolo(1, Game.MODE_EXPEDITION);
-        g.selectRoute(0);
         return g;
     }
-
-    /** 把 v7 字节流还原成 v6：版本号写回 6，并砍掉尾部 8 字节。 */
-    static byte[] downgradeToV6(byte[] v7) {
-        byte[] v6 = Arrays.copyOf(v7, v7.length - TAIL_V7);
-        writeInt(v6, OFF_VERSION, 6);
-        return v6;
+    private static void step(Game g) {
+        g.phase = Game.EVENT;
+        g.eventChoice = 0;
+        check(g.continueEvent(), "advance after migration");
     }
-
-    static int readInt(byte[] d, int off) {
-        return ((d[off] & 0xff) << 24) | ((d[off + 1] & 0xff) << 16)
-                | ((d[off + 2] & 0xff) << 8) | (d[off + 3] & 0xff);
+    private static void reject(byte[] data, String label) {
+        boolean failed = false;
+        try { Codec.decode(data); }
+        catch (IOException expected) { failed = true; }
+        check(failed, label);
     }
+    public static void main(String[] args) throws Exception {
+        Game g = fresh();
+        byte[] v11 = Codec.encode(g);
+        check(versionOf(v11) == 11, "current header must be v11");
+        Game roundTrip = Codec.decode(v11);
+        check(roundTrip.pactMods == g.pactMods && roundTrip.pactHeat == g.pactHeat,
+                "current pact state survives roundtrip");
+        check(Arrays.equals(v11, Codec.encode(roundTrip)), "v11 roundtrip byte-identical");
 
-    static void writeInt(byte[] d, int off, int value) {
-        d[off] = (byte) (value >>> 24);
-        d[off + 1] = (byte) (value >>> 16);
-        d[off + 2] = (byte) (value >>> 8);
-        d[off + 3] = (byte) value;
-    }
+        g.phase = Game.EVENT;
+        g.eventType = 4; // 医疗：3 站后扣血
+        g.eventChoice = -1;
+        check(g.resolveEvent(0), "delayed fixture selected");
+        check(g.pendingChargeCount() == 1, "delayed fixture has one charge");
+        // v11 在完整 v10 快照尾部新增 count(4) + 16 字节/笔，截掉后就是 v10。
+        byte[] v10 = Arrays.copyOf(Codec.encode(g), Codec.encode(g).length - 20);
+        setVersion(v10, 10);
+        Game migrated = Codec.decode(v10);
+        check(migrated.pendingChargeCount() == 1, "v10 single invoice migrated");
+        check(migrated.delayedCharges.get(0).source == Game.DELAY_SOURCE_LEGACY,
+                "v10 unknown source safely marked");
+        check(migrated.delayedAmount == g.delayedAmount
+                && migrated.delayedRooms == g.delayedRooms, "v10 amount/clock retained");
+        check(migrated.pactMods == g.pactMods, "v10 pact state retained");
+        Game saveAgain = Codec.decode(Codec.encode(migrated));
+        check(Arrays.equals(Codec.encode(migrated), Codec.encode(saveAgain)),
+                "migrated invoice byte-identical after v11 re-save");
+        for (int j = 0; j < 3; j++) { step(g); step(migrated); }
+        check(g.pendingChargeCount() == 0 && migrated.pendingChargeCount() == 0,
+                "v10 charge expires exactly once");
+        check(Float.floatToIntBits(g.players.get(0).hp)
+                        == Float.floatToIntBits(migrated.players.get(0).hp),
+                "v10 charge applies same health penalty");
 
-    static void check(boolean ok, String name) {
-        if (!ok) throw new AssertionError("FAIL " + name);
-        passed++;
-        System.out.println("PASS " + name);
+        for (int unsupported : new int[]{0, 5, 6, 12, 99}) {
+            byte[] bad = Arrays.copyOf(v11, v11.length);
+            setVersion(bad, unsupported);
+            reject(bad, "unsupported v" + unsupported + " accepted");
+        }
+        byte[] trailing = Arrays.copyOf(v11, v11.length + 1);
+        reject(trailing, "trailing data accepted");
+        System.out.println("CodecMigrationTest PASS " + checks + " assertions");
     }
+    private CodecMigrationTest() {}
 }

@@ -8,7 +8,7 @@ import java.io.*;
  * 任何越界/非有限浮点数都会被拒绝，而不是带病运行。
  */
 public final class Codec {
-    public static final int MAGIC = 0x41535144, VERSION = 10, PORT = 45454, LIMIT = 1 << 20;
+    public static final int MAGIC = 0x41535144, VERSION = 11, PORT = 45454, LIMIT = 1 << 20;
     /**
      * v7 及更早版本的快照版本号。
      * <p>v7 只追加了尾部两个 int（pactMods / pactHeat），因此 v6 的字节流可以被
@@ -204,6 +204,14 @@ public final class Codec {
         o.writeBoolean(g.pactLimitAnnounced);
         o.writeBoolean(g.shopBuyoutRewardUsed);
         ints(o, g.shopFreeRerolls, g.lastStallKills);
+        // ── v11：多笔独立事件欠款。v9/v10 的旧单笔摘要继续保留供旧档迁移。──
+        if (g.delayedCharges.size() > Game.MAX_DELAYED_CHARGES)
+            throw new IOException("too many delayed charges");
+        o.writeInt(g.delayedCharges.size());
+        for (Game.DelayedCharge c : g.delayedCharges) {
+            ints(o, c.kind, c.rooms, c.source);
+            floats(o, c.amount);
+        }
 
         o.flush();
         byte[] data = b.toByteArray();
@@ -212,9 +220,9 @@ public final class Codec {
     }
 
     /**
-     * 反序列化。同时接受 v7（当前）与 v6（上一版）两种字节流。
-     * <p>v6 档读入后 {@code pactMods=0, pactHeat=0}，即"旧档 = 无词条"，
-     * 与 v2.0 设计文档「支柱 1 存档兼容」一致。
+     * 反序列化 v7–v11 存档与网络快照。
+     * v7/v8 的缺失字段按旧版布局迁移；v9/v10 单笔挂账迁入 v11 账本，
+     * 但不会伪造历史上无法得知的来源。网络联机仍要求同一协议版本。
      */
     public static Game decode(byte[] data) throws IOException {
         if (data == null || data.length > LIMIT) throw new IOException("snapshot too large");
@@ -719,6 +727,38 @@ public final class Codec {
             g.shopBuyoutRewardUsed = false;
             g.shopFreeRerolls = 0;
             g.lastStallKills = Math.max(0, g.kills - g.roomStartKills);
+        }
+
+        // ── v11：独立的多笔欠款，包含来源、金额与各自的剩余站数 ──
+        if (version >= 11) {
+            int mirrorKind = g.delayedKind, mirrorRooms = g.delayedRooms;
+            float mirrorAmount = g.delayedAmount;
+            int chargeCount = count(i, Game.MAX_DELAYED_CHARGES);
+            boolean seenDebt = false;
+            for (int j = 0; j < chargeCount; j++) {
+                int kind = i.readInt(), rooms = i.readInt(), source = i.readInt();
+                float amount = finite(i);
+                range(kind, Game.DELAY_HP, Game.DELAY_COINS);
+                range(rooms, 1, 64);
+                if (source != Game.DELAY_SOURCE_LEGACY && source != 4
+                        && source != Game.DELAY_SOURCE_DEBT && source != 9)
+                    throw new IOException("unknown delayed source");
+                if (source == Game.DELAY_SOURCE_DEBT) {
+                    if (seenDebt || kind != Game.DELAY_HP || g.eventDebt == 0)
+                        throw new IOException("invalid debt charge");
+                    seenDebt = true;
+                }
+                if (!(amount > 0f) || amount > 1_000_000f)
+                    throw new IOException("invalid delayed amount");
+                g.delayedCharges.add(new Game.DelayedCharge(kind, rooms, amount, source));
+            }
+            g.refreshDelayedSummary();
+            if (g.delayedKind != mirrorKind || g.delayedRooms != mirrorRooms
+                    || Float.floatToIntBits(g.delayedAmount) != Float.floatToIntBits(mirrorAmount))
+                throw new IOException("delayed ledger disagrees with legacy summary");
+        } else {
+            // v7–v10 只有一个挂账槽。逐值迁移到新账本，避免旧存档白嫖或双扣。
+            g.migrateLegacyDelay();
         }
 
         if (i.available() != 0) throw new IOException("unexpected trailing bytes");

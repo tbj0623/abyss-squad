@@ -47,17 +47,17 @@ public final class Game {
     public float waveWait, damageTaken;
     // ══════════════════════════════════════════════════════════════
     //  事件机制状态（v2.2 · 13 种选择结构）
-    //  eventDebt/delayedKind/delayedRooms/delayedAmount 已由 Codec v9 起保存，
-    //  旧档迁移默认 0，EventVarietyTest 会强校验挂账读档不丢失。
+    //  v9/v10 保存过单笔摘要；v11 新增 delayedCharges 多笔账本。
+    //  旧档会迁移成一笔来源未知的账，之后每笔都单独计时和结算。
     // ══════════════════════════════════════════════════════════════
     /**
      * 「血债」层数（TYPE 8 风险累积）：每层在结算时按 {@code delayedAmount} 比例扣当前生命。
-     * <p>选择 C 选项（拒绝）可退一层，但收益也因此打折——这是"越贪越贵"的旋钮。
+     * <p>选择 B 选项（抽身）可退一层，但收益也因此打折——这是"越贪越贵"的旋钮。
      */
     public int eventDebt;
     /**
-     * 挂账的结算币种：{@link #DELAY_HP} / {@link #DELAY_COINS}；{@link #DELAY_NONE} = 无挂账。
-     * <p>TYPE 4 / 8 / 9 共用这一组字段，因此同时只能有一笔挂账在途。
+     * 兼容 v9/v10 的最早到期账目摘要，供旧测试与旧档格式使用。
+     * 真实账本为 {@link #delayedCharges}，不可用以下三字段判断总笔数。
      */
     public int delayedKind;
     /** 距离结算还剩几站（{@link #advance()} 每次进入下一站时递减）。 */
@@ -70,6 +70,24 @@ public final class Game {
     public static final int DELAY_HP = 1;
     /** 挂账结算类型：扣星尘。 */
     public static final int DELAY_COINS = 2;
+    /** v11：同一时间允许多笔独立挂账，避免后来的事件冲掉原本欠下的代价。 */
+    public static final int MAX_DELAYED_CHARGES = 16;
+    /** 从 v9/v10 单笔旧档迁移而来，来源已不可追溯。 */
+    public static final int DELAY_SOURCE_LEGACY = 0;
+    /** TYPE 8 血债专用来源；加层/减层只修改自身，不动其他事件的借款。 */
+    public static final int DELAY_SOURCE_DEBT = 8;
+    public static final class DelayedCharge {
+        public int kind, rooms, source;
+        public float amount;
+        public DelayedCharge(int kind, int rooms, float amount, int source) {
+            this.kind = kind;
+            this.rooms = rooms;
+            this.amount = amount;
+            this.source = source;
+        }
+    }
+    /** 欠款账本按加入顺序保留；Codec v11 独立写入每一笔。 */
+    public final ArrayList<DelayedCharge> delayedCharges = new ArrayList<>();
     /**
      * 上一笔挂账的终局播报，供 UI / 探针读取。
      * <p>挂账只影响"下一站开始时"的一次性结算，不参与战斗判定。
@@ -970,6 +988,7 @@ public final class Game {
         if (id != captain || phase != LOBBY || players.isEmpty() || mode < 0 || mode > 3) return false;
         soloRun = single;
         this.mode = mode;
+        clearPendingPenalties();
         // ── v2.0 支柱 2：天赋牌的开局类钩子必须先于 generateRoute() ─────
         // generateRoute 会消费 random；开局遗物/星尘/重掷若在其后应用，
         // 同 seed + 同牌会得到不同的路线（确定性测试会挂）。
@@ -1546,6 +1565,12 @@ public final class Game {
         int type = Events.TYPE[eventType];
         int cost = choice == 0 ? Events.COST_A[eventType] : Events.COST_B[eventType];
         if (coins < cost) return false;
+        // 不能让血债已满的玩家继续无限借星尘，也不能挤爆有限账本。
+        if (choice == 0 && type == 8 && eventDebt >= 9) return false;
+        if (choice == 0 && delayedCharges.size() >= MAX_DELAYED_CHARGES) {
+            if (type == 4 || type == 9) return false;
+            if (type == 8 && !hasDebtCharge()) return false;
+        }
         if (choice == 0) {
             switch (type) {
                 // 献血 / 祭坛 / 反向代价 / 诅咒：A 选项都会直接扣当前生命，
@@ -1585,8 +1610,8 @@ public final class Game {
         // v2.2：元进度「事件收益 +6%/级」（节点 22）此前全项目零消费。
         // 只放大**正向**收益（星尘/治疗量），不放大代价——否则点了节点反而更亏。
         float metaGain = 1f + Math.max(0f, lead.metaEvent);
-        // 延迟挂账的公共写法：3 站后结算。同一次事件里后写覆盖先写，
-        // 因此每个 case 最多挂一笔账（UI 也只展示一笔）。
+        // 延迟代价进入 v11 多笔账本：医疗/赊账互不覆盖；
+        // 血债只更新自身条目，结清时也不取消其他事件的欠款。
         switch (type) {
             // ── 0 献血：用当前生命换永久强度 ────────────────────────
             // PARAM_A = 献出的当前生命比例；PARAM_B = 获得的「血脉契约」层数；
@@ -1770,13 +1795,13 @@ public final class Game {
                     eventDebt = Math.min(9, eventDebt + 1);
                     coins += Math.round((int) pb * metaGain);
                     // 挂账量 = 当前全部层数 × 每层比例（覆盖写入，结算时按当时层数重算）
-                    scheduleDelay(DELAY_HP, 3, pa * eventDebt);
+                    rescheduleDebt(pa * eventDebt);
                     notice = "深渊记下第 " + eventDebt + " 笔债 · +" + (int) pb
                             + " 星尘（3 站后 -" + pct(pa * eventDebt) + "）";
                 } else {
                     eventDebt = Math.max(0, eventDebt - 1);
                     coins += Math.round((int) pc * metaGain);
-                    scheduleDelay(DELAY_HP, 3, pa * eventDebt);
+                    rescheduleDebt(pa * eventDebt);
                     notice = "你抽身了 · 剩 " + eventDebt + " 层债，+" + (int) pc + " 星尘";
                 }
                 break;
@@ -1900,47 +1925,106 @@ public final class Game {
     }
 
     /**
-     * 挂一笔 3 站后的延迟结算。
-     * <p>同一次事件里后写覆盖先写（见 {@link #resolveEvent} 的 case 注释）：
-     * 每个事件只会挂一笔账，UI 也只展示一笔。
-     *
-     * @param kind   {@link #DELAY_HP} 或 {@link #DELAY_COINS}
-     * @param rooms  几站后结算
-     * @param amount 生命币种为最大生命比例；星尘币种为整数星尘
+     * 登记一笔独立挂账。TYPE 4 / 9 的代价不可被后来事件冲抵，来源用于追踪。
+     * 3 站的倒计时从玩家离开该事件房时第一次递减，与旧版本节拍兼容。
      */
     private void scheduleDelay(int kind, int rooms, float amount) {
         if (kind == DELAY_NONE || !(amount > 0f) || !Float.isFinite(amount)) return;
-        delayedKind = kind;
-        delayedRooms = Math.max(1, rooms);
-        delayedAmount = amount;
+        if (delayedCharges.size() >= MAX_DELAYED_CHARGES)
+            throw new IllegalStateException("delayed ledger full");
+        delayedCharges.add(new DelayedCharge(kind, Math.max(1, rooms), amount,
+                Events.TYPE[eventType]));
+        refreshDelayedSummary();
     }
+
+    private boolean hasDebtCharge() {
+        for (DelayedCharge c : delayedCharges) if (c.source == DELAY_SOURCE_DEBT) return true;
+        return false;
+    }
+
+    /** 风险累积事件只修改自己那笔账，清零必须真的撤销，不能顺手抹掉医疗账单。 */
+    private void rescheduleDebt(float amount) {
+        for (int j = 0; j < delayedCharges.size(); j++) {
+            DelayedCharge c = delayedCharges.get(j);
+            if (c.source != DELAY_SOURCE_DEBT) continue;
+            if (!(amount > 0f)) delayedCharges.remove(j);
+            else { c.kind = DELAY_HP; c.rooms = 3; c.amount = amount; }
+            refreshDelayedSummary();
+            return;
+        }
+        if (amount > 0f) {
+            if (delayedCharges.size() >= MAX_DELAYED_CHARGES)
+                throw new IllegalStateException("delayed ledger full");
+            delayedCharges.add(new DelayedCharge(DELAY_HP, 3, amount, DELAY_SOURCE_DEBT));
+        }
+        refreshDelayedSummary();
+    }
+
+    /** 兼容 v9/v10 的单笔字段：始终镜像最早到期的一笔，不参与账本真值运算。 */
+    void refreshDelayedSummary() {
+        DelayedCharge nearest = null;
+        for (DelayedCharge c : delayedCharges)
+            if (nearest == null || c.rooms < nearest.rooms) nearest = c;
+        delayedKind = nearest == null ? DELAY_NONE : nearest.kind;
+        delayedRooms = nearest == null ? 0 : nearest.rooms;
+        delayedAmount = nearest == null ? 0f : nearest.amount;
+    }
+
+    /** Codec v9/v10 迁移入口：遗留快照只有一笔，按原数值继续履约。 */
+    void migrateLegacyDelay() {
+        delayedCharges.clear();
+        if (delayedKind != DELAY_NONE && delayedRooms > 0 && delayedAmount > 0f)
+            delayedCharges.add(new DelayedCharge(delayedKind, delayedRooms, delayedAmount,
+                    DELAY_SOURCE_LEGACY));
+        refreshDelayedSummary();
+    }
+
+    /** 在一局新的远征或测试差分对照中清空当前挂账。不会影响其他模拟状态。 */
+    public void clearPendingPenalties() {
+        delayedCharges.clear();
+        eventDebt = 0;
+        refreshDelayedSummary();
+    }
+
+    /** 当前全部在途笔数（不只是一笔旧式摘要）。 */
+    public int pendingChargeCount() { return delayedCharges.size(); }
+
+    /** 最早到期的站数；无欠款返回 0。 */
+    public int nearestChargeRooms() { return delayedRooms; }
 
     /**
-     * 结算在途的延迟代价。
-     * <p>由 {@link #advance()} 在<b>进入下一站时</b>调用：挂账写的是"3 站后"，
-     * 而 {@code advance()} 每调用一次就推进一站，因此这里递减计数、归零即兑现。
-     * <p>扣生命不会把玩家扣死（保底 1），扣星尘不会扣成负数——与 {@code CoreTests}
-     * 的"事件不会产生负星尘 / 战斗不会因事件直接失败"两条不变量一致。
+     * 每次进站为每笔账独立倒计时；同站到期的所有账同时清算。
+     * 扣生命保底 1，扣星尘保底 0；扣除的是当前资源且真实落入结算。
      */
     private void settleDelayedPenalty() {
-        if (delayedKind == DELAY_NONE) return;
-        if (--delayedRooms > 0) return;
-        if (delayedKind == DELAY_HP) {
-            for (Player p : players) p.hp = Math.max(1f, p.hp - p.maxHp * delayedAmount);
-            delayedNote = "挂账到期 · 生命 -" + pct(delayedAmount);
-        } else {
-            int due = Math.min(coins, Math.round(delayedAmount));
-            coins -= due;
-            delayedNote = "挂账到期 · 星尘 -" + due;
+        if (delayedCharges.isEmpty()) return;
+        StringBuilder settled = new StringBuilder();
+        for (Iterator<DelayedCharge> it = delayedCharges.iterator(); it.hasNext();) {
+            DelayedCharge c = it.next();
+            if (--c.rooms > 0) continue;
+            if (c.kind == DELAY_HP) {
+                for (Player p : players) p.hp = Math.max(1f, p.hp - p.maxHp * c.amount);
+                if (settled.length() > 0) settled.append("；");
+                settled.append("生命 -").append(pct(c.amount));
+            } else if (c.kind == DELAY_COINS) {
+                int due = Math.min(coins, Math.round(c.amount));
+                coins -= due;
+                if (settled.length() > 0) settled.append("；");
+                settled.append("星尘 -").append(due);
+            }
+            if (c.source == DELAY_SOURCE_DEBT || c.source == DELAY_SOURCE_LEGACY)
+                eventDebt = 0;
+            it.remove();
         }
-        notice = delayedNote;
-        delayedKind = DELAY_NONE;
-        delayedRooms = 0;
-        delayedAmount = 0f;
+        refreshDelayedSummary();
+        if (settled.length() > 0) {
+            delayedNote = "挂账到期 · " + settled;
+            notice = delayedNote;
+        }
     }
 
-    /** 当前是否有一笔在途挂账（UI / 探针用）。 */
-    public boolean hasDelayedPenalty() { return delayedKind != DELAY_NONE && delayedRooms > 0; }
+    /** 是否有任何挂账（v11 多笔账本）。 */
+    public boolean hasDelayedPenalty() { return !delayedCharges.isEmpty(); }
 
     public boolean continueEvent() {
         if (phase != EVENT || eventChoice < 0) return false;

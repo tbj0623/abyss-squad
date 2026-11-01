@@ -1,4 +1,4 @@
-# 深渊小队 / Abyss Squad — v2.4.1-beta.1
+# 深渊小队 / Abyss Squad — v2.5.0-beta.1
 
 > **公开测试版**：原生 Android 俯视角割草 + Roguelite 构筑。代码、程序化生成的美术与音频以 MIT 许可证开源。此版本通过核心自动化回归和发布构建验证，但尚未完成多机弱网、低端真机与无障碍专项验收。
 
@@ -128,7 +128,7 @@ java -ea -cp build\probe2 PlayProbe 3 5 0
 
 探针是一个**带人类缺陷**的 bot：注入 180–320ms 反应延迟、±15% 走位漂移、每 2–4 秒换向抖动、10% 技能漏放率，并跑三档选牌策略（贪心 / 流派向 / 最优）。主指标取**流派向**——即真人的典型行为。
 
-### 测试套件（14 套，`scripts/test.ps1`）
+### 测试套件（17 套，`scripts/test.ps1`）
 
 | 套件 | 守护什么 |
 |---|---|
@@ -145,6 +145,9 @@ java -ea -cp build\probe2 PlayProbe 3 5 0
 | PactEffectTest | 12 条契约词条逐条 A/B |
 | EventVarietyTest | 36 个事件效果指纹、延迟扣费及存档 |
 | EventPreviewTest | 36 个事件的两分支风险、费用与可选条件 |
+| DeferredLedgerTest | 多笔延迟代价独立结算、血债清零、v10 存档迁移、v11 损坏检查 |
+| CodecMigrationTest | 当前协议与 v10 迁移、旧版本拒绝、尾部数据校验 |
+| LoopbackTest | 真实 TCP 四客户端联机、重连、版本协商、恶意帧处理 |
 | ContentAudit | 数据表 / 平衡预算 / 契约软性偏差 |
 
 

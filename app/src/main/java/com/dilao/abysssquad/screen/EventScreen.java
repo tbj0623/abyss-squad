@@ -151,6 +151,8 @@ public final class EventScreen {
     private static String blockedHint(Game g, int event, int choice) {
         int cost = choice == 0 ? Events.COST_A[event] : Events.COST_B[event];
         if (g.coins < cost) return "星尘不足 · 需要 " + cost;
+        if (choice == 0 && Events.TYPE[event] == 8 && g.eventDebt >= 9)
+            return "血债已达 9 层上限 · 请选择抽身";
         if (choice == 0 && (Events.TYPE[event] == 0 || Events.TYPE[event] == 3
                 || Events.TYPE[event] == 7 || Events.TYPE[event] == 12)) {
             for (Game.Player p : g.players)
@@ -352,8 +354,12 @@ public final class EventScreen {
         ui.text(c, "B  预付星尘 " + costB + (okB ? "  ·  可选" : "  ·  不可选"),
                 x + 22, y + 62, 13, costB > 0 ? Ui.GOLD : Ui.MUTED, false);
         ui.right(c, "星尘余额 " + Math.max(0, g.coins), x + w - 22, y + 36, 13, Ui.WHITE, true);
-        ui.right(c, canLead ? "生命与延迟代价见左侧" : "等待队长", x + w - 22, y + 62, 11.5f,
-                canLead ? ui.alpha(Ui.MUTED, 200) : Ui.BLUE, false);
+        String pending = g.pendingChargeCount() > 0
+                ? "待结算 " + g.pendingChargeCount() + " 笔 · 最近 " + g.nearestChargeRooms() + " 站"
+                : (canLead ? "生命与延迟代价见左侧" : "等待队长");
+        ui.right(c, pending, x + w - 22, y + 62, 11.5f,
+                g.pendingChargeCount() > 0 ? Ui.GOLD : (canLead ? ui.alpha(Ui.MUTED, 200) : Ui.BLUE),
+                false);
     }
 
     private static int artAccent(int event) {

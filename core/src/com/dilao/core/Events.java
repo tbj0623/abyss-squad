@@ -116,7 +116,8 @@ public final class Events {
                 int next = a ? Math.min(9, debt + 1) : Math.max(0, debt - 1);
                 effect = "星尘 +" + Math.round((int) (a ? pb : pc) * meta)
                         + " · 血债 " + (a ? "+1" : (debt > 0 ? "-1" : "不变"))
-                        + (next > 0 ? " · 3站后生命 -" + pct(pa * next) : " · 无新增血债");
+                        + (next > 0 ? " · 3站后生命 -" + pct(pa * next)
+                        : (debt > 0 ? " · 血债已清零" : " · 无血债待还"));
                 break;
             }
             case 9:
