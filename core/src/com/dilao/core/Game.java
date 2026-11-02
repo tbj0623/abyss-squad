@@ -2443,17 +2443,29 @@ public final class Game {
     //  遗物
     // ══════════════════════════════════════════════════════════════
 
+    // 选牌预览与真正发奖共享同一个权威判定，避免 UI 误报共鸣解锁。
+    public static final int RELIC_INVALID = 0, RELIC_NEW_KIND = 1,
+            RELIC_STACK = 2, RELIC_MAXED_TO_COINS = 3, RELIC_FULL_TO_COINS = 4;
+
+    /** 无副作用地预测发奖结果；流派共鸣按不同遗物种类计数。 */
+    public int relicGrantOutcome(Player p, int id) {
+        if (p == null || id < 0 || id >= Relics.COUNT) return RELIC_INVALID;
+        if (p.relics[id] >= Relics.CAP[id]) return RELIC_MAXED_TO_COINS;
+        if (p.relics[id] <= 0 && distinctRelics(p) >= doctrineRelicSlots())
+            return RELIC_FULL_TO_COINS;
+        return p.relics[id] > 0 ? RELIC_STACK : RELIC_NEW_KIND;
+    }
+
     public void grantRelic(Player p, int id) {
-        if (id < 0 || id >= Relics.COUNT) return;
-        if (p.relics[id] >= Relics.CAP[id]) {
+        int outcome = relicGrantOutcome(p, id);
+        if (outcome == RELIC_INVALID) return;
+        if (outcome == RELIC_MAXED_TO_COINS) {
             coins += 18;
             notice = "满层遗物转化为 18 星尘";
             return;
         }
-        // ── v2.0 支柱 2 #17 孤注一掷：遗物携带上限按"不同种类数"算 ────
-        // 已有的种类升层不受限（否则升满 5 层会变成 5 个槽），只有新种类要占槽。
-        // 满槽时按 18 星尘转化，和"满层转化"同一套经济，不会白给。
-        if (p.relics[id] <= 0 && distinctRelics(p) >= doctrineRelicSlots()) {
+        // #17 孤注一掷只限制新种类；已有遗物升层不会占用新槽。
+        if (outcome == RELIC_FULL_TO_COINS) {
             coins += 18;
             notice = "遗物栏已满 · 转化为 18 星尘";
             return;
@@ -4226,10 +4238,21 @@ public final class Game {
                 if (q.connected && !q.down && distance(q.x, q.y, e.x, e.y) < e.r + 14)
                     hurt(q, contactDamage(e));
         }
-        // 分离
+        separateEnemies();
+    }
+
+    /**
+     * 敌群分离的保守宽相检测：90 敌人最多有 4,005 对，远距离组合
+     * 只算乘加，不调用 Math.hypot。碰撞时仍走原有距离/推力/移动顺序，
+     * 多留 1 像素误差保护带，避免浮点舍入改变贴边行为。
+     */
+    private void separateEnemies() {
         for (int i = 0; i < enemies.size(); i++)
             for (int j = i + 1; j < enemies.size(); j++) {
                 Enemy e = enemies.get(i), f = enemies.get(j);
+                float dx = e.x - f.x, dy = e.y - f.y;
+                float reach = e.r + f.r + 1f;
+                if (dx * dx + dy * dy > reach * reach) continue;
                 float d = distance(e.x, e.y, f.x, f.y);
                 if (d > .1f && d < e.r + f.r) {
                     float push = Math.min(2, (e.r + f.r - d) * .13f);

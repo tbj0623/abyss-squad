@@ -232,10 +232,34 @@ public final class DraftScreen {
             int idx = Math.max(0, Math.min(Relics.COUNT - 1, relic));
             int cap = Math.max(1, Relics.CAP[idx]);
             int held = Math.max(0, p.relics[idx]);
-            ui.centerSmall(c, "已持有 " + Math.min(held, cap) + " 层 / 上限 " + cap,
-                    x + CARD_W * .5f, infoY, 11.5f, held >= cap ? Ui.GOLD : ui.alpha(Ui.WHITE, 220));
-            ui.centerSmall(c, Relics.UPGRADE_HINT[idx], x + CARD_W * .5f, infoY + 22, 10.5f,
-                    ui.alpha(Ui.MUTED, 165));
+            // v2.9：真实发奖预览与 grantRelic 共用权威状态，不能把同款升层
+            // 当作新流派种类，也不能把满槽兑换误写成解锁共鸣。
+            int outcome = g.relicGrantOutcome(p, idx);
+            int before = g.schoolCount(p, school);
+            int after = before + (outcome == Game.RELIC_NEW_KIND ? 1 : 0);
+            boolean unlocks = before < 3 && after >= 3;
+            String progress = "已持有 " + Math.min(held, cap) + "/" + cap
+                    + " 层  ·  共鸣 " + Math.min(before, 3) + "/3 → " + Math.min(after, 3) + "/3";
+            ui.centerSmall(c, progress, x + CARD_W * .5f, infoY,
+                    ui.fit(progress, CARD_W - 54, 11.5f, 10f),
+                    unlocks ? Ui.GOLD : ui.alpha(Ui.WHITE, 220));
+            String prospect;
+            if (outcome == Game.RELIC_MAXED_TO_COINS) {
+                prospect = "遗物已满层 · 兑换 18 星尘";
+            } else if (outcome == Game.RELIC_FULL_TO_COINS) {
+                prospect = "遗物栏已满 · 兑换 18 星尘";
+            } else if (unlocks) {
+                prospect = "将激活共鸣 · " + Content.SCHOOL_BONUS[school];
+            } else if (after >= 3) {
+                prospect = "共鸣已激活 · " + Content.SCHOOL_BONUS[school];
+            } else if (outcome == Game.RELIC_STACK) {
+                prospect = "同款升层不推进共鸣 · " + Relics.UPGRADE_HINT[idx];
+            } else {
+                prospect = "距离共鸣还差 " + (3 - after) + " 种遗物 · " + Relics.UPGRADE_HINT[idx];
+            }
+            ui.centerSmall(c, prospect, x + CARD_W * .5f, infoY + 22,
+                    ui.fit(prospect, CARD_W - 46, 10.7f, 9f),
+                    unlocks ? Ui.GOLD : ui.alpha(Ui.MUTED, 205));
         }
 
         // 选择按钮（可点击区高 88）
