@@ -105,6 +105,10 @@ public final class GameView extends View {
     private int flashLevel = 100, particleLevel = 100, numberLevel = 100;
     /** 左撇子镜像布局（UX 报告：左右手习惯不能假设）。 */
     private boolean leftHanded;
+    /** 可选单手作战：空白处浮动摇杆 + 情境自动技能，默认关闭。 */
+    private boolean oneHand;
+    private float lastAssistSkillAt = -1000f, lastAssistUltAt = -1000f;
+    private final Paint floatingStickPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private int selMode = Game.MODE_EXPEDITION, selRole = 0, selContract = 1;
 
     // 战斗区缓存
@@ -149,7 +153,9 @@ public final class GameView extends View {
         // 再调 setLayerType 会强制重启 HardwareRenderer（主线程卡在
         // RenderProxy::setStopped）。两种情况都要避免，所以这里什么都不做。
         setFocusableInTouchMode(true);
-        setContentDescription("深渊小队。横屏动作肉鸽，左侧拖动移动，右侧拖动瞄准，自动攻击。");
+        setContentDescription(oneHand
+                ? "深渊小队单手作战。任意空白处拖动移动，自动瞄准、技能与终极。"
+                : "深渊小队。左侧拖动移动，右侧拖动瞄准，自动攻击。");
         // 引导进度存在独立的 "abyss-onboarding" prefs 里，不碰 Meta 的 JSON
         onboarding.bind(activity);
         warmUpScreens();
@@ -200,6 +206,7 @@ public final class GameView extends View {
         showFps = prefs.getInt("showFps", 0);
         lang = prefs.getInt("lang", 0);
         leftHanded = prefs.getBoolean("leftHanded", false);
+        oneHand = prefs.getBoolean("oneHand", false);
         // v2.0 无障碍：三个独立滑条（0..100）。闪光默认 60（长途对局不刺眼），其余 100 = 不削减
         flashLevel = prefs.getInt("flash", 60);
         particleLevel = prefs.getInt("particles", 100);
@@ -211,7 +218,8 @@ public final class GameView extends View {
         prefs.edit().putBoolean("sound", sound).putBoolean("music", musicOn)
                 .putBoolean("vibrate", vibrate).putInt("volume", volume)
                 .putInt("shake", shakeLevel).putInt("quality", quality)
-                .putInt("showFps", showFps).putBoolean("leftHanded", leftHanded).putInt("lang", lang)
+                .putInt("showFps", showFps).putBoolean("leftHanded", leftHanded)
+                .putBoolean("oneHand", oneHand).putInt("lang", lang)
                 .putInt("flash", flashLevel).putInt("particles", particleLevel)
                 .putInt("numbers", numberLevel)
                 .putInt("role", selRole).apply();
@@ -257,16 +265,17 @@ public final class GameView extends View {
     }
 
     /**
-     * 打包 12 项设置给 {@code SetScreen}。下标即契约，必须与 {@code SetScreen.O_*} 一一对应：
+     * 打包 13 项设置给 {@code SetScreen}。下标即契约，必须与 {@code SetScreen.O_*} 一一对应：
      * <pre>
      *  0 sound  1 music  2 volume  3 vibrate  4 shake  5 quality
-     *  6 showFps  7 lang  8 flash  9 particles  10 numbers  11 leftHanded
+     *  6 showFps  7 lang  8 flash  9 particles  10 numbers  11 leftHanded  12 oneHand
      * </pre>
      */
     private int[] settingsOpts() {
         return new int[]{sound ? 1 : 0, musicOn ? 1 : 0, volume, vibrate ? 1 : 0,
                 shakeLevel, quality, showFps, lang,
-                flashLevel, particleLevel, numberLevel, leftHanded ? 1 : 0};
+                flashLevel, particleLevel, numberLevel, leftHanded ? 1 : 0,
+                oneHand ? 1 : 0};
     }
 
     /**
@@ -289,6 +298,10 @@ public final class GameView extends View {
             numberLevel = Math.max(0, Math.min(100, o[10]));
         }
         if (o.length >= 12) leftHanded = o[11] != 0;
+        if (o.length >= 13) oneHand = o[12] != 0;
+        setContentDescription(oneHand
+                ? "深渊小队单手作战。战斗空白区域任意拖动移动，自动瞄准、技能与终极；闪避仍可手动操作。"
+                : "深渊小队。左侧拖动移动，右侧拖动瞄准，自动攻击。");
         applyFxSettings();
         saveSettings();
     }
@@ -691,6 +704,31 @@ public final class GameView extends View {
 
     // ── 局内 ──────────────────────────────────────────────────────
 
+    /**
+     * 单手模式只在可接收输入的战斗帧触发：空场/商店/转场不自动消耗技能。
+     * 联机客户端可能比服务端晚收到冷却更新，额外的实时时间闸门防止同一决定
+     * 在一段网络延迟内连续重复发送。技能仍经 Session.input 的权威入口处理。
+     */
+    private void assistCombat(Game g) {
+        if (!oneHand || g == null || session == null) return;
+        Game.Player p = g.player(session.localId);
+        int actions = OneHandAssist.actions(g, p);
+        if ((actions & OneHandAssist.SKILL) != 0 && visualTime - lastAssistSkillAt >= .75f) {
+            lastAssistSkillAt = visualTime;
+            skillSerial++;
+            pressHud(1);
+            beep(GameAudio.SKILL);
+            if (!session.online()) onboarding.notifySkill();
+        }
+        if ((actions & OneHandAssist.ULTIMATE) != 0 && visualTime - lastAssistUltAt >= 1.25f) {
+            lastAssistUltAt = visualTime;
+            session.ultimate();
+            pressHud(2);
+            beep(GameAudio.ULT);
+            if (!session.online()) onboarding.notifyUlt();
+        }
+    }
+
     private void drawRun(Canvas c, float simDt) {
         if (session == null) { leave(); return; }
         Game g = session.game;
@@ -698,6 +736,7 @@ public final class GameView extends View {
 
         boolean canLead = !session.online() || g.captain == session.localId;
         boolean blockInput = paused || inventory || transition > .01f;
+        if (!blockInput && g.phase == Game.FIGHT) assistCombat(g);
         session.input(blockInput ? 0 : dx, blockInput ? 0 : dy, ax, ay,
                 !blockInput && aiming, dashSerial, skillSerial);
         session.update(simDt);
@@ -753,6 +792,7 @@ public final class GameView extends View {
         switch (g.phase) {
             case Game.FIGHT:
                 drawHud(c, g, p, canLead);
+                if (oneHand) drawOneHandOverlay(c);
                 break;
             case Game.MAP:
                 backgroundPanel(c);
@@ -1262,6 +1302,22 @@ public final class GameView extends View {
             boolean.class, float.class, float.class};
     private java.lang.reflect.Method hudDraw;
 
+    /** 浮动摇杆画在真实落指处，避免单手模式里「手指在右、摇杆在左」的错觉。 */
+    private void drawOneHandOverlay(Canvas c) {
+        ui.pill(c, 242, 24, 146, "单手 · 自动技能", Ui.MINT);
+        if (moveId < 0) return;
+        floatingStickPaint.setStyle(Paint.Style.FILL);
+        floatingStickPaint.setColor(0x1a74e9c6);
+        c.drawCircle(moveOriginX, moveOriginY, 70, floatingStickPaint);
+        floatingStickPaint.setStyle(Paint.Style.STROKE);
+        floatingStickPaint.setStrokeWidth(2.5f);
+        floatingStickPaint.setColor(0x9999f5d9);
+        c.drawCircle(moveOriginX, moveOriginY, 70, floatingStickPaint);
+        floatingStickPaint.setStyle(Paint.Style.FILL);
+        floatingStickPaint.setColor(0xb7a4ffe7);
+        c.drawCircle(moveOriginX + dx * 42, moveOriginY + dy * 42, 23, floatingStickPaint);
+    }
+
     private void drawHud(Canvas c, Game g, Game.Player p, boolean canLead) {
         if (hud != null) {
             try {
@@ -1530,13 +1586,21 @@ public final class GameView extends View {
                     fx.shake(9, .35f);
                     fx.hitstop(.15f);
                     beep(GameAudio.ULT);
-                } else if (bx < 620 && y > 300 && moveId < 0) {
-                    // 移动区上下放宽到 y>300，避免下缘摸不到
+                } else if (oneHand && y > 145 && y < 790 && moveId < 0
+                        && Game.distance(bx, y, 1300, 552) > 80) {
+                    // 单手模式：任意战斗空白区都能起手浮动摇杆，保留顶部信息
+                    // 与技能按钮热区。左右手镜像时只改按钮判断，不改触摸差值。
                     moveId = pid;
                     moveOriginX = x;
                     moveOriginY = y;
                     setMove(x, y);
-                } else if (bx > 980 && y > 320 && y < 680 && aimId < 0) {
+                } else if (!oneHand && bx < 620 && y > 300 && moveId < 0) {
+                    // 传统双摇杆区域保持原样，单手设置默认关闭。
+                    moveId = pid;
+                    moveOriginX = x;
+                    moveOriginY = y;
+                    setMove(x, y);
+                } else if (!oneHand && bx > 980 && y > 320 && y < 680 && aimId < 0) {
                     aimId = pid;
                     setAim(x, y);
                 }

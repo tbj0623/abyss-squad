@@ -26,18 +26,18 @@ public final class SetScreen {
 
     // ── opts 下标（必须与 GameView.settingsOpts() 逐项对应，任何一侧插队都会全体错位）──
     // 0 sound · 1 music · 2 volume · 3 vibrate · 4 shake · 5 quality
-    // 6 showFps · 7 lang · 8 flash · 9 particles · 10 numbers · 11 leftHanded
+    // 6 showFps · 7 lang · 8 flash · 9 particles · 10 numbers · 11 leftHanded · 12 oneHand
     private static final int O_SOUND = 0, O_MUSIC = 1, O_VOLUME = 2, O_VIBRATE = 3,
             O_SHAKE = 4, O_QUALITY = 5, O_FPS = 6, O_LANG = 7,
-            O_FLASH = 8, O_PARTICLES = 9, O_NUMBERS = 10, O_LEFT = 11;
+            O_FLASH = 8, O_PARTICLES = 9, O_NUMBERS = 10, O_LEFT = 11, O_ONE = 12;
     /** opts[] 长度。改这里必须同步改 GameView.settingsOpts()。 */
-    private static final int OPT_LEN = 12;
+    private static final int OPT_LEN = 13;
 
     // ── 控件 id ──
     private static final int C_BACK = 1;
     private static final int C_SOUND = 10, C_MUSIC = 11, C_VOL = 12, C_VIBRATE = 13,
             C_SHAKE = 14, C_Q_LOW = 15, C_Q_MID = 16, C_Q_HIGH = 17, C_FPS = 18, C_LANG = 19,
-            C_FLASH = 20, C_PARTICLES = 21, C_NUMBERS = 22, C_LEFT = 23;
+            C_FLASH = 20, C_PARTICLES = 21, C_NUMBERS = 22, C_LEFT = 23, C_ONE = 24;
     private static final int C_RESET = 30, C_RESET_YES = 31, C_RESET_NO = 32;
 
     private boolean confirmReset = false;
@@ -47,7 +47,7 @@ public final class SetScreen {
     }
 
     /**
-     * @param opts 12 项，见类注释的下标表；长度不足时用内置默认值绘制（只读不影响游戏）
+     * @param opts 13 项，见类注释的下标表；长度不足时用内置默认值绘制（只读不影响游戏）
      * @param fps  当前帧率（showFps 打开时显示）
      */
     public void draw(Canvas c, Ui ui, float time, int[] opts, float fps) {
@@ -72,6 +72,7 @@ public final class SetScreen {
             o[O_PARTICLES] = 100;
             o[O_NUMBERS] = 100;
             o[O_LEFT] = 0;
+            o[O_ONE] = 0;
         }
 
         backdrop(c, ui, time);
@@ -84,7 +85,7 @@ public final class SetScreen {
         accessPanel(c, ui, time, o);
         archivePanel(c, ui, time);
         // 底部通栏：玩法说明（纯文字，无命中区）
-        guidePanel(c, ui, time);
+        guidePanel(c, ui, time, o);
     }
 
     // ─────────────────────────── 背景 / 顶栏 ───────────────────────────
@@ -162,9 +163,12 @@ public final class SetScreen {
         sliderRow(c, ui, C_PARTICLES, x + 24, y + 154, w - 48, "粒子密度", "特效粒子数量", o[O_PARTICLES], Ui.MINT);
         sliderRow(c, ui, C_NUMBERS, x + 24, y + 210, w - 48, "伤害数字密度", "同屏飘字上限", o[O_NUMBERS], Ui.VIOLET);
 
-        // 左撇子镜像（y+264..326）
-        rowToggle(c, ui, C_LEFT, x + 24, y + 264, w - 48, "左撇子模式",
-                "镜像触控布局：移动区换到右侧", o[O_LEFT] != 0);
+        // 双开关并排（y+264..326）：原左手布局与新增单手辅助互不覆盖。
+        float half = (w - 60) * .5f;
+        rowToggle(c, ui, C_LEFT, x + 24, y + 264, half, "左手布局",
+                "镜像按钮与传统摇杆", o[O_LEFT] != 0);
+        rowToggle(c, ui, C_ONE, x + 36 + half, y + 264, half, "单手作战",
+                "浮动摇杆 + 自动技能", o[O_ONE] != 0);
 
         ui.text(c, "系统「动画时长缩放」为 0 时，震屏与闪光会自动归零。",
                 x + 24, y + 344, 11.5f, ui.alpha(Ui.MUTED, 190), false);
@@ -189,25 +193,32 @@ public final class SetScreen {
             ui.ghost(c, C_RESET, x + w - 200, y + 96, 176, 48, "重置存档");
         }
 
-        ui.text(c, "深渊小队 v1.0  ·  Canvas 2D 自绘", x + 24, y + 168, 11,
+        ui.text(c, "深渊小队 v2.8  ·  Canvas 2D 自绘", x + 24, y + 168, 11,
                 ui.alpha(Ui.MUTED, 170), false);
         ui.right(c, "美术 / 文本 / 音效均为原创", x + w - 24, y + 168, 11,
                 ui.alpha(Ui.MUTED, 150), false);
     }
 
     // ────────────────────── 玩法说明（底部通栏 x 64..1376, y 670..760）──────────────────────
-    private void guidePanel(Canvas c, Ui ui, float time) {
+    private void guidePanel(Canvas c, Ui ui, float time, int[] o) {
         final float x = 64, y = 670, w = 1312, h = 90;
         ui.panel(c, x, y, w, h, 18, 0xff101d24, Ui.EDGE);
         sectionTitle(c, ui, x + 24, y + 8, "玩法说明", "CONTROLS");
 
-        String[][] tips = {
+        String[][] tips = o[O_ONE] != 0 ? new String[][]{
+                {"任意空白处拖动", "浮动摇杆移动"},
+                {"松手即停", "始终自动瞄准射击"},
+                {"技能自动释放", "附近出现敌人时触发"},
+                {"终极自动释放", "首领或大规模敌群出现时"},
+                {"闪避保留手动", "关键时刻仍可按闪避"},
+                {"关闭单手辅助", "恢复双摇杆手动瞄准"}
+        } : new String[][]{
                 {"左半屏拖动", "移动，摇杆半径决定速度"},
                 {"右半屏拖动", "手动瞄准，松手回自动"},
                 {"自动攻击", "始终锁定最近敌人"},
                 {"闪避按钮", "短距位移 + 无敌帧"},
                 {"技能按钮", "职业主动技能，有冷却"},
-                {"终结技能", "能量满后释放"},
+                {"终结技能", "能量满后释放"}
         };
         float colW = (w - 48) / 3f;
         for (int i = 0; i < tips.length; i++) {
@@ -324,6 +335,7 @@ public final class SetScreen {
             case C_FPS: opts[O_FPS] = opts[O_FPS] != 0 ? 0 : 1; break;
             case C_LANG: opts[O_LANG] = opts[O_LANG] != 0 ? 0 : 1; break;
             case C_LEFT: opts[O_LEFT] = opts[O_LEFT] != 0 ? 0 : 1; break;
+            case C_ONE: opts[O_ONE] = opts[O_ONE] != 0 ? 0 : 1; break;
             case C_Q_LOW: opts[O_QUALITY] = 0; break;
             case C_Q_MID: opts[O_QUALITY] = 1; break;
             case C_Q_HIGH: opts[O_QUALITY] = 2; break;
